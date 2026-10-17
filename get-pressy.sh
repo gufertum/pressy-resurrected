@@ -2,7 +2,7 @@
 # Installs the latest pressy release from GitHub:
 #   curl -fsSL https://raw.githubusercontent.com/gufertum/pressy-resurrected/main/get-pressy.sh | bash
 # Downloads the release zip, verifies its sha256, unpacks it and runs its scripts/install.sh.
-# Options (environment): PRESSY_VERSION=0.4.0 for a specific release, PRESSY_RELEASE_URL to download
+# Options (environment): PRESSY_VERSION=0.4.1 for a specific release, PRESSY_RELEASE_URL to download
 # from another location (a folder holding the zip and .sha256, file:// works).
 set -euo pipefail
 
