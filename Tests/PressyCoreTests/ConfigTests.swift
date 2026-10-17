@@ -17,7 +17,7 @@ struct ConfigTests {
     }
 
     @Test func exampleConfigInTheRepoIsValid() throws {
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../config.example.json")
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../config.example.yaml")
         let config = try Config.load(from: url)
         #expect(!config.patterns.isEmpty)
     }
@@ -85,7 +85,7 @@ struct ConfigTests {
         (#"{"longPressMs": true}"#, "longPressMs: must be a number from 100 to 5000"),
         (#"{"sequenceGapMs": 50}"#, "sequenceGapMs: must be a number from 100 to 3000"),
         (#"{"restoreAudioRoute": 1}"#, "restoreAudioRoute: must be true or false"),
-        ("[]", "top level must be a JSON object"),
+        ("[]", "top level must be an object"),
         ("{", "invalid JSON"),
         (#"{"patterns": {".": []}}"#, #"patterns["."]: the action list is empty"#),
         (#"{"patterns": {".": [{"sound": "Glass"}, {"nope": "x"}]}}"#, #"patterns["."][1]: unknown key "nope""#),
@@ -108,9 +108,19 @@ struct ConfigTests {
         }
     }
 
-    @Test func defaultURLHonoursEnvironment() {
-        #expect(Config.defaultURL(environment: ["PRESSY_CONFIG": "/tmp/p.json"]).path == "/tmp/p.json")
-        #expect(Config.defaultURL(environment: ["XDG_CONFIG_HOME": "/x"]).path == "/x/pressy/config.json")
-        #expect(Config.defaultURL(environment: [:]).path.hasSuffix("/.config/pressy/config.json"))
+    @Test func defaultURLPrefersYamlAndFallsBackToExistingFiles() {
+        let none: (String) -> Bool = { _ in false }
+        #expect(Config.defaultURL(environment: ["PRESSY_CONFIG": "/tmp/p.json"], exists: none).path == "/tmp/p.json")
+        #expect(Config.defaultURL(environment: ["XDG_CONFIG_HOME": "/x"], exists: none).path == "/x/pressy/config.yaml")
+        #expect(Config.defaultURL(environment: ["XDG_CONFIG_HOME": "/x"], exists: { $0.hasSuffix(".json") }).path == "/x/pressy/config.json")
+        #expect(Config.defaultURL(environment: ["XDG_CONFIG_HOME": "/x"], exists: { !$0.hasSuffix(".yaml") }).path == "/x/pressy/config.yml")
+        #expect(Config.defaultURL(environment: [:], exists: none).path.hasSuffix("/.config/pressy/config.yaml"))
+    }
+
+    @Test func formatFollowsTheExtension() {
+        #expect(ConfigFormat(url: URL(fileURLWithPath: "/a/config.json")) == .json)
+        #expect(ConfigFormat(url: URL(fileURLWithPath: "/a/config.JSON")) == .json)
+        #expect(ConfigFormat(url: URL(fileURLWithPath: "/a/config.yml")) == .yaml)
+        #expect(ConfigFormat(url: URL(fileURLWithPath: "/a/config")) == .yaml)
     }
 }

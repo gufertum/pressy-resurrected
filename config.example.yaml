@@ -1,0 +1,18 @@
+# pressy configuration, see README.md
+# Patterns: "." short press, "-" long press, up to 5 presses. Keep them quoted:
+# a bare - would start a YAML list.
+
+longPressMs: 500          # held at least this long = "-"
+sequenceGapMs: 400        # silence that ends a pattern
+restoreAudioRoute: true   # keep sound on the speakers when the Pressy is plugged in
+actionTimeoutSeconds: 30
+
+patterns:
+  ".":   { builtin: spotify.playpause }
+  "..":  { builtin: spotify.next }
+  "...": { builtin: spotify.previous }
+  "-":                      # several actions run one after another
+    - sound: Tink
+    - builtin: input.togglemute
+  ".-":  { raycast: confetti }
+  "-.":  { run: "say 'Pressy is alive'" }

@@ -1,4 +1,5 @@
 import Foundation
+import Yams
 
 public enum Action: Equatable, Hashable, Sendable, CustomStringConvertible {
     case builtin(BuiltinAction)
@@ -68,24 +69,36 @@ public struct ConfigError: Error, Equatable, CustomStringConvertible {
     public var description: String { message }
 }
 
-/// The JSON config, by default `~/.config/pressy/config.json`. Unknown keys are errors, so typos fail loudly.
+/// File format of a config, chosen by extension: `.json` is JSON, everything else YAML.
+public enum ConfigFormat: Sendable {
+    case yaml, json
+
+    public init(url: URL) { self = url.pathExtension.lowercased() == "json" ? .json : .yaml }
+}
+
+/// The config, by default `~/.config/pressy/config.yaml` (JSON works too). Unknown keys are errors, so typos fail loudly.
 public struct Config: Equatable, Sendable {
     public var timing = PressTiming()
     /// Undo the switch to the jack's "headphones" and "microphone" that macOS performs on plug-in.
     public var restoreAudioRoute = true
     public var actionTimeout: TimeInterval = 30
-    /// Pattern -> actions, run one after another. In JSON a single action may be written without the list.
+    /// Pattern -> actions, run one after another. In the file a single action may be written without the list.
     public var patterns: [String: [Action]] = [:]
 
     public init() {}
 
     public var allActions: [Action] { patterns.values.flatMap { $0 } }
 
-    public static func defaultURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+    /// `$PRESSY_CONFIG`, else the first existing of config.yaml, config.yml, config.json in the pressy
+    /// config folder, else config.yaml there (the file to create).
+    public static func defaultURL(environment: [String: String] = ProcessInfo.processInfo.environment,
+                                  exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> URL {
         if let path = environment["PRESSY_CONFIG"], !path.isEmpty { return URL(fileURLWithPath: path) }
         let base = environment["XDG_CONFIG_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config")
-        return base.appendingPathComponent("pressy/config.json")
+        let folder = base.appendingPathComponent("pressy")
+        let candidates = ["config.yaml", "config.yml", "config.json"].map { folder.appendingPathComponent($0) }
+        return candidates.first { exists($0.path) } ?? candidates[0]
     }
 
     public static func load(from url: URL) throws -> Config {
@@ -93,17 +106,26 @@ public struct Config: Equatable, Sendable {
         do { data = try Data(contentsOf: url) } catch {
             throw ConfigError("\(url.path): cannot read: \(error.localizedDescription)")
         }
-        do { return try parse(data) } catch let error as ConfigError {
+        do { return try parse(data, format: ConfigFormat(url: url)) } catch let error as ConfigError {
             throw ConfigError("\(url.path): \(error.message)")
         }
     }
 
-    public static func parse(_ data: Data) throws -> Config {
+    public static func parse(_ data: Data, format: ConfigFormat = .json) throws -> Config {
         let root: Any
-        do { root = try JSONSerialization.jsonObject(with: data) } catch {
-            throw ConfigError("invalid JSON: \(error.localizedDescription)")
+        switch format {
+        case .json:
+            do { root = try JSONSerialization.jsonObject(with: data) } catch {
+                throw ConfigError("invalid JSON: \(error.localizedDescription)")
+            }
+        case .yaml:
+            do { root = try normalized(Yams.load(yaml: String(decoding: data, as: UTF8.self)) ?? [String: Any]()) } catch let error as ConfigError {
+                throw error
+            } catch {
+                throw ConfigError("invalid YAML: \(error) (quote patterns, e.g. \"-\": ...)")
+            }
         }
-        guard let object = root as? [String: Any] else { throw ConfigError("top level must be a JSON object") }
+        guard let object = root as? [String: Any] else { throw ConfigError("top level must be an object (a mapping)") }
         try rejectUnknownKeys(object, allowed: ["longPressMs", "sequenceGapMs", "restoreAudioRoute", "actionTimeoutSeconds", "patterns"], at: "config")
 
         var config = Config()
@@ -115,7 +137,9 @@ public struct Config: Equatable, Sendable {
             config.restoreAudioRoute = b.boolValue
         }
         if let v = object["patterns"] {
-            guard let patterns = v as? [String: Any] else { throw ConfigError("patterns: must be an object of pattern -> action") }
+            guard let patterns = v as? [String: Any] else {
+                throw ConfigError("patterns: must be an object of pattern -> action; in YAML quote the patterns, \"-\" alone starts a list")
+            }
             for (pattern, value) in patterns {
                 try validate(pattern: pattern)
                 let path = "patterns[\"\(pattern)\"]"
@@ -128,6 +152,48 @@ public struct Config: Equatable, Sendable {
             }
         }
         return config
+    }
+
+    public func encoded(as format: ConfigFormat) -> Data { format == .json ? jsonData() : yamlData() }
+
+    /// Readable YAML that `parse` reads back to an equal config. Patterns and values are always written as
+    /// double-quoted strings (JSON escaping is valid YAML), so no value can turn into YAML syntax.
+    public func yamlData() -> Data {
+        func quoted(_ text: String) -> String {
+            String(decoding: try! JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes]), as: UTF8.self)
+        }
+        var lines = [
+            "# pressy configuration, see https://git.sudo.li/lab/pressy-resurrected",
+            "# Patterns: \".\" short press, \"-\" long press, up to \(PressTiming.maxLength) presses. Keep them quoted.",
+            "",
+            "longPressMs: \(Int((timing.longPress * 1000).rounded()))",
+            "sequenceGapMs: \(Int((timing.sequenceGap * 1000).rounded()))",
+            "restoreAudioRoute: \(restoreAudioRoute)",
+            "actionTimeoutSeconds: \(Int(actionTimeout.rounded()))",
+            "",
+        ]
+        if patterns.isEmpty { lines.append("patterns: {}") } else { lines.append("patterns:") }
+        for pattern in sortedPatterns {
+            let actions = patterns[pattern]!
+            if actions.count == 1 {
+                lines.append("  \(quoted(pattern)): { \(actions[0].kind): \(quoted(actions[0].value)) }")
+            } else {
+                lines.append("  \(quoted(pattern)):")
+                lines += actions.map { "    - \($0.kind): \(quoted($0.value))" }
+            }
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    /// Yams returns `[AnyHashable: Any]` mappings; the validation works on `[String: Any]` like JSONSerialization's.
+    private static func normalized(_ value: Any) throws -> Any {
+        if let mapping = value as? [AnyHashable: Any] {
+            var result: [String: Any] = [:]
+            for (key, item) in mapping { result["\(key.base)"] = try normalized(item) }
+            return result
+        }
+        if let list = value as? [Any] { return try list.map(normalized) }
+        return value
     }
 
     /// Pretty, key-sorted JSON that `parse` reads back to an equal config. Single actions are written without a list.

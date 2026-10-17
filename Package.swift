@@ -8,8 +8,11 @@ let infoPlist = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appe
 let package = Package(
     name: "pressy",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.2"),
+    ],
     targets: [
-        .target(name: "PressyCore"),
+        .target(name: "PressyCore", dependencies: [.product(name: "Yams", package: "Yams")]),
         .executableTarget(
             name: "pressy",
             dependencies: ["PressyCore"],

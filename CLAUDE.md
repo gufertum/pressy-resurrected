@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-macOS daemon (Swift 6, SwiftPM, no dependencies) that seizes the jack's built-in `Headset` HID device and maps
+macOS daemon plus menu bar app (Swift 6, SwiftPM, only dependency Yams) that seizes the jack's built-in `Headset` HID device and maps
 Pressy press patterns to actions. User docs: README.md.
 
 ## Commands
@@ -13,7 +13,7 @@ Pressy press patterns to actions. User docs: README.md.
 
 ## Layout
 
-- `Sources/PressyCore` - pure, unit-tested logic: `PatternRecognizer`, `Config` (JSON, strict), `AudioRoutePolicy`, `BuiltinAction`
+- `Sources/PressyCore` - pure, unit-tested logic: `PatternRecognizer`, `Config` (YAML or JSON by extension, strict; default ~/.config/pressy/config.yaml), `AudioRoutePolicy`, `BuiltinAction`
 - `Sources/pressy` - IOKit HID (`HeadsetButton`), CoreAudio (`AudioHardware`, `AudioRouteGuard`), `ActionRunner`, CLI in `main.swift`
 - `Support/Info.plist` - embedded into the binary via `-sectcreate` (bundle id for TCC)
 - `scripts/` - install / uninstall, LaunchAgent plist is generated there
