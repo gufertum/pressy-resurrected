@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Stops and removes the LaunchAgent and the binary. Keeps the config and the log.
+# Stops and removes both LaunchAgents, the binary and the menu bar app. Keeps the config, the logs and the certificate.
 set -euo pipefail
 
-LABEL=li.sudo.pressy
 PREFIX="${PREFIX:-$HOME/.local}"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+APP="${PRESSY_APP:-$HOME/Applications/Pressy.app}"
 
-launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-rm -f "$PLIST" "$PREFIX/bin/pressy"
+for label in li.sudo.pressy.bar li.sudo.pressy; do
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  rm -f "$HOME/Library/LaunchAgents/$label.plist"
+done
+rm -f "$PREFIX/bin/pressy"
+rm -rf "$APP"
 
-echo "removed LaunchAgent $LABEL and $PREFIX/bin/pressy"
-echo "kept: ${XDG_CONFIG_HOME:-$HOME/.config}/pressy/ and ~/Library/Logs/pressy.log"
+echo "removed LaunchAgents li.sudo.pressy and li.sudo.pressy.bar, $PREFIX/bin/pressy and $APP"
+echo "kept: ${XDG_CONFIG_HOME:-$HOME/.config}/pressy/, ~/Library/Logs/pressy*.log, the \"pressy local signing\" certificate"
 echo "privacy entries: remove pressy with - in System Settings > Privacy & Security > Input Monitoring"

@@ -1,52 +1,47 @@
 #!/usr/bin/env bash
-# Builds pressy, installs it to $PREFIX/bin (default ~/.local/bin), creates a config from the
-# example if there is none, and (re)loads the LaunchAgent li.sudo.pressy.
+# Builds pressy and the menu bar app, installs ~/.local/bin/pressy and ~/Applications/Pressy.app,
+# creates a config from the example if there is none, and (re)loads the LaunchAgents
+# li.sudo.pressy (daemon) and li.sudo.pressy.bar (menu bar app).
 set -euo pipefail
 
 LABEL=li.sudo.pressy
+APP_LABEL=li.sudo.pressy.bar
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN="$PREFIX/bin/pressy"
+APP="${PRESSY_APP:-$HOME/Applications/Pressy.app}"
 CONFIG="${PRESSY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pressy/config.json}"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+AGENTS="$HOME/Library/LaunchAgents"
 LOG="$HOME/Library/Logs/pressy.log"
 DOMAIN="gui/$(id -u)"
 SIGN_IDENTITY="${PRESSY_SIGN_IDENTITY:-pressy local signing}"
 
 cd "$(dirname "$0")/.."
 
-swift build -c release
-install -d "$PREFIX/bin"
-install -m 755 .build/release/pressy "$BIN"
-# Signed with the bundle id from the embedded Info.plist; macOS privacy settings list it as "pressy".
-# The local certificate (scripts/make-signing-cert.sh) keeps privacy grants across rebuilds, ad-hoc does not.
+# The local certificate (make cert) keeps privacy grants across rebuilds, ad-hoc does not.
 if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
-  codesign --force --sign "$SIGN_IDENTITY" --identifier "$LABEL" "$BIN"
+  SIGN="$SIGN_IDENTITY"
 else
   echo "warning: no \"$SIGN_IDENTITY\" identity (make cert), signing ad-hoc: privacy grants are lost with every build" >&2
-  codesign --force --sign - --identifier "$LABEL" "$BIN"
+  SIGN=-
 fi
 
-if [[ ! -f "$CONFIG" ]]; then
-  install -d "$(dirname "$CONFIG")"
-  cp config.example.json "$CONFIG"
-  echo "created $CONFIG from config.example.json"
-fi
-"$BIN" check --config "$CONFIG"
-
-install -d "$(dirname "$PLIST")" "$(dirname "$LOG")"
-cat > "$PLIST" <<EOF
+# write_agent LABEL LOGFILE PROGRAM [ARGS...]: LaunchAgent started at login, restarted after a crash.
+write_agent() {
+  local label=$1 log=$2
+  shift 2
+  {
+    cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>$LABEL</string>
+	<string>$label</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>$BIN</string>
-		<string>run</string>
-		<string>--config</string>
-		<string>$CONFIG</string>
+EOF
+    for arg in "$@"; do printf '\t\t<string>%s</string>\n' "$arg"; done
+    cat <<EOF
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -60,16 +55,40 @@ cat > "$PLIST" <<EOF
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>
 	<key>StandardOutPath</key>
-	<string>$LOG</string>
+	<string>$log</string>
 	<key>StandardErrorPath</key>
-	<string>$LOG</string>
+	<string>$log</string>
 </dict>
 </plist>
 EOF
+  } > "$AGENTS/$label.plist"
+  launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+  launchctl bootstrap "$DOMAIN" "$AGENTS/$label.plist"
+}
 
-launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$PLIST"
+swift build -c release
 
-echo "installed $BIN, LaunchAgent $LABEL loaded"
+# Daemon. Signed with the bundle id from its embedded Info.plist; privacy settings list it as "pressy".
+install -d "$PREFIX/bin"
+install -m 755 .build/release/pressy "$BIN"
+codesign --force --sign "$SIGN" --identifier "$LABEL" "$BIN"
+
+if [[ ! -f "$CONFIG" ]]; then
+  install -d "$(dirname "$CONFIG")"
+  cp config.example.json "$CONFIG"
+  echo "created $CONFIG from config.example.json"
+fi
+"$BIN" check --config "$CONFIG"
+
+# Menu bar app: a plain bundle around the PressyBar executable.
+install -d "$APP/Contents/MacOS" "$AGENTS" "$(dirname "$LOG")"
+install -m 755 .build/release/PressyBar "$APP/Contents/MacOS/PressyBar"
+cp Support/PressyBar-Info.plist "$APP/Contents/Info.plist"
+codesign --force --sign "$SIGN" "$APP"
+
+write_agent "$LABEL" "$LOG" "$BIN" run --config "$CONFIG"
+write_agent "$APP_LABEL" "$HOME/Library/Logs/pressy-bar.log" "$APP/Contents/MacOS/PressyBar"
+
+echo "installed $BIN and $APP, LaunchAgents $LABEL and $APP_LABEL loaded"
 echo "config: $CONFIG"
 echo "logs:   tail -f $LOG"

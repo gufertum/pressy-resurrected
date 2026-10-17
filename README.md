@@ -7,7 +7,7 @@
 Tested on a MacBook Pro M5 (Mac17,2) with macOS 27.0.1. It should work on any Apple silicon Mac whose 3.5 mm jack takes headsets.
 
 - [Quick start](#quick-start)
-- [Using it](#using-it): [patterns](#press-patterns), [config](#configure), [actions](#actions), [commands](#commands), [permissions](#permissions), [logs](#logs), [troubleshooting](#troubleshooting-dont-panic)
+- [Using it](#using-it): [menu bar app](#menu-bar-app), [patterns](#press-patterns), [config](#configure), [actions](#actions), [commands](#commands), [permissions](#permissions), [logs](#logs), [troubleshooting](#troubleshooting-dont-panic)
 - [How it works](#how-it-works)
 - [Development](#development)
 
@@ -18,7 +18,7 @@ xcode-select --install          # once, if the Command Line Tools are missing
 git clone ssh://git@git.sudo.li:222/lab/pressy-resurrected.git
 cd pressy-resurrected
 make cert                       # once: local code-signing certificate, keeps permissions across updates
-make install                    # tests, builds, installs ~/.local/bin/pressy and the LaunchAgent li.sudo.pressy
+make install                    # tests, builds, installs ~/.local/bin/pressy, ~/Applications/Pressy.app and their LaunchAgents
 ```
 
 1. Plug the Pressy into the headphone jack.
@@ -38,6 +38,18 @@ The first Spotify press asks whether `pressy` may control Spotify: allow it.
 Your sound stays on the speakers and your mic stays the built-in one, even though macOS thinks you just plugged in a headset.
 
 ## Using it
+
+### Menu bar app
+
+`Pressy.app` puts a ◎ in the menu bar; it flashes on every press. Click it to see:
+
+- whether the daemon runs, has Input Monitoring and whether the Pressy is plugged in
+- the live activity: each press with its duration, the recognised pattern and every action's result
+- the current configuration
+
+**Edit…** (<kbd>⌘</kbd><kbd>,</kbd>) opens the editor: a page per pattern and one for the general settings. For each action, pick its type and then the value: built-ins from a grouped list, Shortcuts from your Shortcuts library, a script or sound file through a file picker, key combinations with **Record** (click, then press the keys), Raycast deeplinks from examples. **Test now** runs a pattern's actions once without saving. **Save & apply** validates everything, writes `config.json` and restarts the daemon. The editor rewrites the file in its own sorted format.
+
+The app is optional: it only edits the config file and listens to the daemon. It starts at login (LaunchAgent `li.sudo.pressy.bar`); **Quit Pressy menu** in its ⋯ menu stops it until the next login.
 
 ### Press patterns
 
@@ -178,7 +190,7 @@ esac
 
 All commands take `--config PATH`. Exit codes: `0` ok, `1` action or check failed, `64` usage, `69` Headset device missing or held by another pressy, `75` restart requested (new permission), `78` config error.
 
-`make install` / `make uninstall` (keeps config, log and certificate) / `make logs` (`tail -f` on the log) / `make cert`.
+`make install` / `make uninstall` (keeps config, logs and certificate) / `make logs` (`tail -f` on the log) / `make cert`.
 
 Remove everything, including the certificate and the privacy entries:
 
@@ -334,6 +346,19 @@ pressy only undoes a switch to a jack device that appeared within the last 5 sec
 - `output.*` and `input.togglemute` talk to CoreAudio directly.
 - `media.*` posts system media-key events. The cleaner MediaRemote API no longer answers third-party processes on current macOS.
 
+### Daemon and menu bar app
+
+```mermaid
+flowchart LR
+  D["pressy daemon<br/>li.sudo.pressy"] -->|"li.sudo.pressy.press / .pattern / .action / .state"| A["Pressy.app<br/>li.sudo.pressy.bar"]
+  A -->|"li.sudo.pressy.ping"| D
+  A -->|"writes, validated"| C["~/.config/pressy/config.json"]
+  A -->|"launchctl kickstart -k"| D
+  C -->|"read at start"| D
+```
+
+They talk through distributed notifications in your login session; the names and keys are defined once in [Events.swift](Sources/PressyCore/Events.swift). Nothing is queued, so the app asks for the daemon's state with `ping` when it opens. The editor and the daemon share `PressyCore`, so the editor rejects exactly what the daemon would reject.
+
 ### Code layout
 
 ```mermaid
@@ -358,7 +383,8 @@ flowchart LR
 
 | Path | Contents |
 |---|---|
-| `Sources/PressyCore/` | `PatternRecognizer`, `Config` (strict JSON), `AudioRoutePolicy`, `BuiltinAction` |
+| `Sources/PressyCore/` | `PatternRecognizer`, `Config` (strict JSON), `ConfigDraft` (editor model), `KeyCombo`, `BuiltinAction` (table), `AudioRoutePolicy`, `PressyEvent` (daemon -> app contract) |
+| `Sources/PressyBar/` | the menu bar app (SwiftUI `MenuBarExtra`): `AppModel`, `ConfigEditor`, `ActionRow` with the key recorder |
 | `Sources/pressy/` | `HeadsetButton` (IOKit HID), `AudioHardware` + `AudioRouteGuard` (CoreAudio), `ActionRunner`, `Log`, CLI in `main.swift` |
 | `Support/Info.plist` | linked into the binary (`-sectcreate`), gives it the bundle id `li.sudo.pressy` for the privacy settings |
 | `scripts/` | install / uninstall (the LaunchAgent plist is generated by `install.sh`), `make-signing-cert.sh` |
@@ -372,4 +398,4 @@ make build      # release build in .build/release/pressy
 .build/release/pressy trigger .. --config config.example.json   # try an action without the button
 ```
 
-Swift 6 language mode, no dependencies. So long, and thanks for all the clicks.
+Swift 6 language mode, no dependencies. Builds with the Command Line Tools alone: the Makefile adds the swift-testing plugin path, and the app uses `@Local` (a thin wrapper around `SwiftUI.State`) because `@State` is a macro in the macOS 27 SDK whose plugin ships only with Xcode. So long, and thanks for all the clicks.

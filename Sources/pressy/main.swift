@@ -4,7 +4,7 @@ import Foundation
 import IOKit.hid
 import PressyCore
 
-let version = "0.1.0"
+let version = "0.2.0"
 let launchAgentLabel = "li.sudo.pressy"
 
 enum Exit {
@@ -113,7 +113,7 @@ func check(_ url: URL) -> Never {
     print("config ok: \(url.path)")
     print(String(format: "  long press >= %.0f ms, sequence gap %.0f ms, restoreAudioRoute %@, action timeout %.0f s",
                  config.timing.longPress * 1000, config.timing.sequenceGap * 1000, "\(config.restoreAudioRoute)", config.actionTimeout))
-    for pattern in config.patterns.keys.sorted(by: { ($0.count, $0) < ($1.count, $1) }) {
+    for pattern in config.sortedPatterns {
         let actions = config.patterns[pattern]!.map(\.description).joined(separator: ", then ")
         print("  \(pattern.padding(toLength: 6, withPad: " ", startingAt: 0)) \(actions)")
     }
@@ -144,9 +144,12 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
     let recognizer = PatternRecognizer(timing: config.timing, knownPatterns: Set(config.patterns.keys), schedule: mainQueueSchedule) { pattern in
         guard let actions = config.patterns[pattern] else {
             Log.info("pattern", ["pattern": pattern, "mapped": false])
+            PressyEvent.post(PressyEvent.pattern, [PressyEvent.Key.pattern: pattern, PressyEvent.Key.actions: "", PressyEvent.Key.mapped: false])
             return
         }
-        Log.info("pattern", ["pattern": pattern, "actions": actions.map(\.description).joined(separator: ", then "), "dry_run": dryRun])
+        let described = actions.map(\.description).joined(separator: ", then ")
+        Log.info("pattern", ["pattern": pattern, "actions": described, "dry_run": dryRun])
+        PressyEvent.post(PressyEvent.pattern, [PressyEvent.Key.pattern: pattern, PressyEvent.Key.actions: described, PressyEvent.Key.mapped: true])
         if !dryRun { runner.perform(actions, pattern: pattern) }
     }
 
@@ -157,7 +160,11 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
             pressedAt = time
             recognizer.buttonDown(at: time)
         } else {
-            if let start = pressedAt { Log.info("press", ["ms": Int((time - start) * 1000)]) }
+            if let start = pressedAt {
+                let millis = Int((time - start) * 1000)
+                Log.info("press", ["ms": millis])
+                PressyEvent.post(PressyEvent.press, [PressyEvent.Key.ms: millis])
+            }
             pressedAt = nil
             recognizer.buttonUp(at: time)
         }
@@ -187,8 +194,25 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
         accessPoll = timer
     }
 
-    let routeGuard = config.restoreAudioRoute && !dryRun ? AudioRouteGuard() : nil
-    routeGuard?.start()
+    runner.onResult = { pattern, action, ok, millis, detail in
+        PressyEvent.post(PressyEvent.action, [PressyEvent.Key.pattern: pattern, PressyEvent.Key.action: action.description,
+                                              PressyEvent.Key.ok: ok, PressyEvent.Key.ms: millis, PressyEvent.Key.detail: detail])
+    }
+
+    let routeGuard = AudioRouteGuard(restore: config.restoreAudioRoute && !dryRun)
+    let postState: @MainActor () -> Void = {
+        PressyEvent.post(PressyEvent.state, [
+            PressyEvent.Key.version: version, PressyEvent.Key.pid: Int(getpid()), PressyEvent.Key.config: url.path,
+            PressyEvent.Key.inputMonitoring: inputMonitoringGrantedInFreshProcess(), PressyEvent.Key.jack: routeGuard.jackInUse,
+        ])
+    }
+    routeGuard.onJackChange = { _ in postState() }
+    routeGuard.start()
+    // The menu bar app asks for the state when it starts.
+    let pingObserver = DistributedNotificationCenter.default().addObserver(forName: PressyEvent.ping, object: nil, queue: .main) { _ in
+        MainActor.assumeIsolated { postState() }
+    }
+    postState()
 
     var signalSources: [DispatchSourceSignal] = []
     for sig in [SIGTERM, SIGINT] {
@@ -202,7 +226,7 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
         signalSources.append(source)
     }
 
-    withExtendedLifetime((button, recognizer, runner, routeGuard, signalSources, accessPoll)) {
+    withExtendedLifetime((button, recognizer, runner, routeGuard, signalSources, accessPoll, pingObserver)) {
         CFRunLoopRun()
     }
     exit(Exit.ok)

@@ -17,6 +17,8 @@ let package = Package(
                 .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", infoPlist]),
             ]
         ),
+        // The menu bar app; scripts/build-app.sh wraps it into Pressy.app.
+        .executableTarget(name: "PressyBar", dependencies: ["PressyCore"]),
         .testTarget(name: "PressyCoreTests", dependencies: ["PressyCore"]),
     ]
 )

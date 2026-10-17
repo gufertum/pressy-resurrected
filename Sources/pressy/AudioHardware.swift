@@ -116,10 +116,16 @@ enum AudioHardware {
     }
 }
 
-/// Watches the device list and the default devices and applies `AudioRoutePolicy`.
+/// Watches the device list and the default devices, reports whether the jack is in use and,
+/// when `restore` is set, applies `AudioRoutePolicy`.
 @MainActor
 final class AudioRouteGuard {
     private var policy = AudioRoutePolicy()
+    private let restore: Bool
+    private(set) var jackInUse = false
+    var onJackChange: ((Bool) -> Void)?
+
+    init(restore: Bool) { self.restore = restore }
 
     func start() {
         let selectors = [kAudioHardwarePropertyDevices] + AudioRole.allCases.map(AudioHardware.selector)
@@ -136,6 +142,13 @@ final class AudioRouteGuard {
 
     private func evaluate() {
         let devices = AudioHardware.snapshot()
+        let jack = devices.contains(where: \.isJack)
+        if jack != jackInUse {
+            jackInUse = jack
+            Log.info("jack", ["in_use": jack])
+            onJackChange?(jack)
+        }
+        guard restore else { return }
         var defaults: [AudioRole: UInt32] = [:]
         for role in AudioRole.allCases { defaults[role] = AudioHardware.defaultDevice(role) }
         let switches = policy.evaluate(now: ProcessInfo.processInfo.systemUptime, devices: devices, defaults: defaults)
