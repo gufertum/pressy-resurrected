@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>io.schaedler.pressy</string>
+	<string>li.sudo.pressy</string>
 	<key>CFBundleName</key>
 	<string>pressy</string>
 	<key>CFBundleShortVersionString</key>

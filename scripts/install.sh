@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds pressy, installs it to $PREFIX/bin (default ~/.local/bin), creates a config from the
-# example if there is none, and (re)loads the LaunchAgent io.schaedler.pressy.
+# example if there is none, and (re)loads the LaunchAgent li.sudo.pressy.
 set -euo pipefail
 
-LABEL=io.schaedler.pressy
+LABEL=li.sudo.pressy
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN="$PREFIX/bin/pressy"
 CONFIG="${PRESSY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pressy/config.json}"

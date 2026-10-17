@@ -2,7 +2,7 @@
 # Stops and removes the LaunchAgent and the binary. Keeps the config and the log.
 set -euo pipefail
 
-LABEL=io.schaedler.pressy
+LABEL=li.sudo.pressy
 PREFIX="${PREFIX:-$HOME/.local}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 

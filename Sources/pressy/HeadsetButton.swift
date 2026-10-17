@@ -10,7 +10,7 @@ enum HeadsetError: Error, CustomStringConvertible {
         switch self {
         case .heldByAnotherProcess:
             "the Headset HID device is held by another process; is the LaunchAgent running? "
-                + "Stop it first: launchctl bootout gui/\(getuid())/io.schaedler.pressy"
+                + "Stop it first: launchctl bootout gui/\(getuid())/li.sudo.pressy"
         case .openFailed(let code):
             String(format: "opening the Headset HID device failed: IOReturn 0x%08X", code)
         case .notFound:

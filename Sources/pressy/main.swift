@@ -4,13 +4,14 @@ import IOKit.hid
 import PressyCore
 
 let version = "0.1.0"
-let launchAgentLabel = "io.schaedler.pressy"
+let launchAgentLabel = "li.sudo.pressy"
 
 enum Exit {
     static let ok: Int32 = 0
     static let failure: Int32 = 1
     static let usage: Int32 = 64 // EX_USAGE
     static let unavailable: Int32 = 69 // EX_UNAVAILABLE
+    static let restart: Int32 = 75 // EX_TEMPFAIL; the LaunchAgent restarts on any non-zero exit
     static let config: Int32 = 78 // EX_CONFIG
 }
 
@@ -140,6 +141,24 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
     }
     Log.info("listening", ["device": "Headset", "seized": true])
 
+    // Without Input Monitoring the seized device opens fine but delivers no values. The grant only
+    // applies to a fresh process, so wait for it and exit; launchd starts pressy again.
+    var accessPoll: DispatchSourceTimer?
+    if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
+        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        Log.warn("input monitoring not granted, presses will not arrive",
+                 ["fix": "System Settings > Privacy & Security > Input Monitoring > allow pressy"])
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler {
+            guard IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else { return }
+            Log.info("input monitoring granted, exiting so it takes effect", ["exit": Exit.restart])
+            exit(Exit.restart)
+        }
+        timer.resume()
+        accessPoll = timer
+    }
+
     let routeGuard = config.restoreAudioRoute && !dryRun ? AudioRouteGuard() : nil
     routeGuard?.start()
 
@@ -155,7 +174,7 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
         signalSources.append(source)
     }
 
-    withExtendedLifetime((button, recognizer, runner, routeGuard, signalSources)) {
+    withExtendedLifetime((button, recognizer, runner, routeGuard, signalSources, accessPoll)) {
         CFRunLoopRun()
     }
     exit(Exit.ok)
