@@ -196,3 +196,13 @@ extension Action {
         }
     }
 }
+
+extension Config {
+    /// Display order: fewer presses first, short before long (".", "-", "..", ".-", "-.", "--", ...).
+    public static func displayOrder(_ a: String, _ b: String) -> Bool {
+        let key = { (p: String) in (p.count, p.replacingOccurrences(of: ".", with: "0").replacingOccurrences(of: "-", with: "1")) }
+        return key(a) < key(b)
+    }
+
+    public var sortedPatterns: [String] { patterns.keys.sorted(by: Config.displayOrder) }
+}
