@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>pressy @VERSION@</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="LICENSE"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <options customize="never" require-scripts="true" hostArchitectures="arm64"/>
+    <domains enable_localSystem="true"/>
+    <volume-check>
+        <allowed-os-versions><os-version min="14.0"/></allowed-os-versions>
+    </volume-check>
+    <choices-outline><line choice="default"><line choice="li.sudo.pressy"/></line></choices-outline>
+    <choice id="default"/>
+    <choice id="li.sudo.pressy" visible="false"><pkg-ref id="li.sudo.pressy"/></choice>
+    <pkg-ref id="li.sudo.pressy" version="@VERSION@" onConclusion="none">pressy-component.pkg</pkg-ref>
+</installer-gui-script>

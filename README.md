@@ -8,14 +8,30 @@
 
 [Pressy](https://en.wikipedia.org/wiki/Pressy_Button) was a 2014 Kickstarter gadget: a tiny button that sits in the headphone jack and triggers actions on Android phones. The company and its app are long gone. `pressy` is a small macOS daemon that makes the button useful again: press patterns like `.`, `..`, `-` or `.-` run shell commands, Apple Shortcuts or built-in actions such as Spotify play/pause, next track or microphone mute.
 
+https://github.com/user-attachments/assets/441d08d7-cca0-4219-b76d-5032864f286f
+
+*Sound on: a click plays and pauses Spotify, holding the button fires Raycast confetti.*
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-dark.png">
+  <img src="docs/images/menu-light.png" alt="The pressy menu bar app: daemon status, live activity of presses and actions, current patterns" width="380">
+</picture>
+</p>
+
 Tested on a MacBook Pro M5 (Mac17,2) with macOS 27.0.1. It should work on any Apple silicon Mac whose 3.5 mm jack takes headsets.
 
 - [Quick start](#quick-start)
+- [Works with](#works-with)
 - [Using it](#using-it): [menu bar app](#menu-bar-app), [patterns](#press-patterns), [config](#configure), [actions](#actions), [commands](#commands), [permissions](#permissions), [logs](#logs), [troubleshooting](#troubleshooting-dont-panic)
 - [How it works](#how-it-works)
 - [Development](#development)
 
 ## Quick start
+
+**Installer package.** Download `pressy-<version>.pkg` from the [latest release](https://github.com/gufertum/pressy-resurrected/releases/latest) and open it. It is not notarized (that needs a paid Apple Developer ID), so the first time macOS refuses to open it: go to System Settings > Privacy & Security, click **Open Anyway** next to the pressy message, and run the installer.
+
+**Or the one-liner** in Terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gufertum/pressy-resurrected/main/get-pressy.sh | bash
@@ -69,6 +85,19 @@ The first Spotify press asks whether `pressy` may control Spotify: allow it.
 
 Your sound stays on the speakers and your mic stays the built-in one, even though macOS thinks you just plugged in a headset.
 
+## Works with
+
+| | |
+|---|---|
+| [Spotify](https://www.spotify.com/download/mac/) | play/pause, next, previous; only while Spotify runs, it never launches it |
+| [Apple Music](https://www.apple.com/apple-music/) | play/pause, next, previous |
+| [Raycast](https://www.raycast.com) | any [deeplink](https://manual.raycast.com/deeplinks): confetti, clipboard history, window management, your own script commands and extensions |
+| [Apple Shortcuts](https://support.apple.com/guide/shortcuts-mac/welcome/mac) | run any Shortcut by name, the editor lists yours |
+| any app | key combinations (`cmd+shift+4`, `ctrl+cmd+q`, ...), shell commands and scripts |
+| your Mac | dark mode, lock, sleep, screen saver, mute, volume, microphone mute, keep awake |
+
+**Buttons:** the original Pressy, its clones (Klick, Mi Key, the unnamed AliExpress ones) and the center button of any wired headset with a 4-pole plug. They all work the same way electrically.
+
 ## Using it
 
 ### Menu bar app
@@ -79,7 +108,17 @@ Your sound stays on the speakers and your mic stays the built-in one, even thoug
 - the live activity: each press with its duration, the recognised pattern and every action's result
 - the current configuration
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/editor-pattern-dark.png">
+  <img src="docs/images/editor-pattern-light.png" alt="The pressy editor: a pattern with a sound and a built-in action" width="620">
+</picture>
+
 **Edit…** (<kbd>⌘</kbd><kbd>,</kbd>) opens the editor: a page per pattern and one for the general settings. For each action, pick its type and then the value: built-ins from a grouped list, Shortcuts from your Shortcuts library, a script or sound file through a file picker, key combinations with **Record** (click, then press the keys), Raycast deeplinks from examples. **Test now** runs a pattern's actions once without saving. **Save & apply** validates everything, writes the config file (in its format, YAML or JSON) and restarts the daemon. The editor rewrites the file in its own tidy format, so comments you added by hand are lost.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/editor-general-dark.png">
+  <img src="docs/images/editor-general-light.png" alt="The pressy editor: timing and behaviour settings" width="620">
+</picture>
 
 The app is optional: it only edits the config file and listens to the daemon. It starts at login (LaunchAgent `li.sudo.pressy.bar`); **Quit Pressy menu** in its ⋯ menu stops it until the next login.
 
@@ -244,10 +283,11 @@ make uninstall && rm -rf ~/.config/pressy ~/Library/Logs/pressy*.log
 security delete-identity -c "pressy local signing"   # only if you ran make cert
 ```
 
-Installed with the one-liner, without a checkout:
+Installed with the one-liner or the package, without a checkout:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gufertum/pressy-resurrected/main/scripts/uninstall.sh | bash
+sudo rm -rf "/Library/Application Support/pressy" && sudo pkgutil --forget li.sudo.pressy   # only after the .pkg
 ```
 
 Then remove **pressy** with **−** under System Settings > Privacy & Security > Input Monitoring (and Accessibility, if you used `media.*`).
@@ -446,7 +486,8 @@ flowchart LR
 ```bash
 make test       # swift test; with only the Command Line Tools it adds the swift-testing plugin path
 make build      # release build in .build/release/pressy
-make release    # dist/pressy-<version>-macos-arm64.zip + .sha256, signed with the local certificate
+make release    # dist/pressy-<version>-macos-arm64.zip and .pkg, each with .sha256, programs signed with the local certificate
+make screenshots  # docs/images/*.png, rendered by the app itself with demo data (light and dark)
 .build/release/pressy trigger .. --config config.example.yaml   # try an action without the button
 ```
 

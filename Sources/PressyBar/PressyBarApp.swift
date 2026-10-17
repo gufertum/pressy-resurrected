@@ -5,6 +5,15 @@ import SwiftUI
 struct PressyBarApp: App {
     @Local private var model = AppModel()
 
+    init() {
+        // `PressyBar --screenshots DIR` renders the README images and quits.
+        let arguments = CommandLine.arguments
+        if let index = arguments.firstIndex(of: "--screenshots"), index + 1 < arguments.count {
+            let folder = URL(fileURLWithPath: arguments[index + 1])
+            Task { @MainActor in await Screenshots.render(into: folder) }
+        }
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuContent(model: model)

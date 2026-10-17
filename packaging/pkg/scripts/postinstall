@@ -1,0 +1,13 @@
+#!/bin/bash
+# Runs as root after the payload is in place. pressy is a per-user install (binary in ~/.local/bin,
+# app in ~/Applications, LaunchAgents in ~/Library), so the bundled install.sh runs as the user at
+# the console, inside that user's launchd session. Output goes to /var/log/install.log.
+set -euo pipefail
+
+RELEASE="/Library/Application Support/pressy/release"
+USER_NAME="$(stat -f %Su /dev/console)"
+[[ -n "$USER_NAME" && "$USER_NAME" != root && "$USER_NAME" != loginwindow ]] \
+  || { echo "pressy: no user logged in at the console, run $RELEASE/scripts/install.sh yourself" >&2; exit 1; }
+USER_ID="$(id -u "$USER_NAME")"
+
+launchctl asuser "$USER_ID" sudo -u "$USER_NAME" -H /bin/bash "$RELEASE/scripts/install.sh"
