@@ -2,7 +2,7 @@
 TESTING_PLUGINS := /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 TEST_FLAGS := $(if $(wildcard $(TESTING_PLUGINS)),-Xswiftc -plugin-path -Xswiftc $(TESTING_PLUGINS))
 
-.PHONY: build test cert install uninstall reload logs release
+.PHONY: build test cert install uninstall reload logs release screenshots
 
 build:
 	swift build -c release
@@ -27,3 +27,8 @@ logs:
 
 release: test
 	scripts/release.sh
+
+# The app renders its own windows with demo data, so no Screen Recording permission is needed.
+screenshots:
+	swift build -c release
+	.build/release/PressyBar --screenshots $(CURDIR)/docs/images
