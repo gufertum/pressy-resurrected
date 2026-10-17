@@ -8,6 +8,7 @@ Pressy press patterns to actions. User docs: README.md.
 - `make test` - swift test (adds the swift-testing plugin path needed with Command Line Tools only)
 - `make build` - release build, `.build/release/pressy`
 - `make install` / `make uninstall` - binary to ~/.local/bin, LaunchAgent `li.sudo.pressy`
+- `make cert` - one-time self-signed identity "pressy local signing"; install.sh signs with it so TCC grants survive rebuilds (ad-hoc otherwise)
 - `.build/release/pressy trigger <pattern> --config <file>` - run one action without the button
 
 ## Layout

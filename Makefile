@@ -2,13 +2,16 @@
 TESTING_PLUGINS := /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
 TEST_FLAGS := $(if $(wildcard $(TESTING_PLUGINS)),-Xswiftc -plugin-path -Xswiftc $(TESTING_PLUGINS))
 
-.PHONY: build test install uninstall reload logs
+.PHONY: build test cert install uninstall reload logs
 
 build:
 	swift build -c release
 
 test:
 	swift test $(TEST_FLAGS)
+
+cert:
+	scripts/make-signing-cert.sh
 
 install: test
 	scripts/install.sh

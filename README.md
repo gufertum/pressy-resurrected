@@ -17,11 +17,12 @@ Tested on a MacBook Pro M5 (Mac17,2) with macOS 27.0.1. It should work on any Ap
 xcode-select --install          # once, if the Command Line Tools are missing
 git clone ssh://git@git.sudo.li:222/lab/pressy-resurrected.git
 cd pressy-resurrected
+make cert                       # once: local code-signing certificate, keeps permissions across updates
 make install                    # tests, builds, installs ~/.local/bin/pressy and the LaunchAgent li.sudo.pressy
 ```
 
 1. Plug the Pressy into the headphone jack.
-2. macOS asks whether `pressy` may use **Input Monitoring**: allow it. pressy restarts itself a moment later.
+2. Allow **Input Monitoring** for `pressy` when macOS asks; without it the button stays silent. Step by step: [Permissions](#permissions).
 3. Press:
 
 | Press | Pattern | Default action |
@@ -151,23 +152,60 @@ esac
 
 All commands take `--config PATH`. Exit codes: `0` ok, `1` action or check failed, `64` usage, `69` Headset device missing or held by another pressy, `75` restart requested (new permission), `78` config error.
 
-`make install` / `make uninstall` (keeps config and log) / `make logs` (`tail -f` on the log).
+`make install` / `make uninstall` (keeps config, log and certificate) / `make logs` (`tail -f` on the log) / `make cert`.
+
+Remove everything, including the certificate and the privacy entries:
+
+```bash
+make uninstall && rm -rf ~/.config/pressy ~/Library/Logs/pressy.log
+security delete-identity -c "pressy local signing"
+```
+
+Then remove **pressy** with **−** under System Settings > Privacy & Security > Input Monitoring (and Accessibility, if you used `media.*`).
 
 ### Permissions
 
-macOS asks once per permission. The entries are called `pressy` in System Settings > Privacy & Security.
+macOS asks once per permission. All entries are called `pressy` and live in **System Settings > Privacy & Security**.
 
 | Permission | Needed for | When it is asked |
 |---|---|---|
-| Input Monitoring | the button itself | on the first start; pressy restarts itself once you allow it |
+| Input Monitoring | the button itself, always | on the first start |
 | Automation (Spotify, Music) | `spotify.*`, `music.*` | on the first such press |
-| Accessibility | `media.*` | at start, when the config uses a `media.*` action |
+| Accessibility | `media.*` only | at start, when the config uses a `media.*` action |
 
-The binary is ad-hoc signed, so macOS ties these grants to the exact build. After rebuilding, clear the old entries and allow again:
+**Input Monitoring** (required). pressy can hold the button without it, but macOS never delivers a single press.
 
-```bash
-tccutil reset All li.sudo.pressy && pressy reload
-```
+1. On the first start macOS shows *"pressy" would like to receive keystrokes from any application*. Click **Open System Settings**.
+2. Under **Input Monitoring**, switch **pressy** on. If it is not listed, click **+**, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd>, enter `~/.local/bin/pressy`, add it and switch it on.
+3. Presses work right away. Within about a minute pressy also notices the grant and restarts itself, so its state and log are clean:
+
+   ```
+   INFO input monitoring granted, restarting exit=75
+   INFO start version=0.1.0 ... input_monitoring=granted
+   ```
+
+   Impatient? `pressy reload` does the same at once.
+
+Check the current state any time: `grep input_monitoring ~/Library/Logs/pressy.log | tail -1`.
+
+**Automation** (Spotify, Music). The first `spotify.*` press shows *"pressy" wants access to control "Spotify"*: click **Allow**. Clicked Don't Allow by accident? Privacy & Security > Automation > pressy > Spotify, switch it on.
+
+**Accessibility** (`media.*` only). Switch **pressy** on under Privacy & Security > Accessibility, then `pressy reload`.
+
+**Updates and the signing certificate.** macOS ties every grant to the code signature of the binary.
+
+- With the local certificate (`make cert`, once) every build is signed by the same identity, so the grants survive `make install`.
+- Without it the build is signed ad-hoc and each build counts as a new app. The old switch stays on in System Settings but no longer applies: the log says `input_monitoring=denied` and macOS does not ask again.
+
+To fix a stale switch (also needed once when moving from ad-hoc to the certificate):
+
+1. System Settings > Privacy & Security > **Input Monitoring**: select **pressy**, click **−**.
+2. Click **+**, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd>, enter `~/.local/bin/pressy`, click **Open** and switch it on.
+3. Presses work right away; pressy restarts itself within about a minute.
+
+`tccutil reset` cannot do this for pressy: it only knows apps registered with Launch Services, and pressy is a bare binary.
+
+`make cert` runs [scripts/make-signing-cert.sh](scripts/make-signing-cert.sh). It creates the self-signed identity "pressy local signing" in your login keychain (valid 10 years). The certificate is not added to any trust settings, and only `codesign` may use its key.
 
 ### Logs
 
@@ -185,8 +223,8 @@ tccutil reset All li.sudo.pressy && pressy reload
 
 | Symptom | Fix |
 |---|---|
-| Presses do nothing, log says `input monitoring not granted` | allow `pressy` under Privacy & Security > Input Monitoring |
-| Worked before a rebuild, now nothing | `tccutil reset All li.sudo.pressy && pressy reload`, then allow again |
+| Presses do nothing, log says `input monitoring not granted` | allow `pressy` under Privacy & Security > Input Monitoring, see [Permissions](#permissions) |
+| Switch for pressy is on, but presses do nothing, log says `input_monitoring=denied` | the grant belongs to an older build: remove pressy with **−** and add it again, see [Permissions](#permissions); `make cert` prevents this |
 | Music opens or Spotify toggles on its own when you press | pressy is not running: `launchctl print gui/$(id -u)/li.sudo.pressy`, check the log |
 | `held by another process` | `pressy watch` while the agent runs; stop the agent first (see [Press patterns](#press-patterns)) |
 | Spotify does not react | Spotify must be running; check Privacy & Security > Automation > pressy > Spotify |
@@ -297,7 +335,7 @@ flowchart LR
 | `Sources/PressyCore/` | `PatternRecognizer`, `Config` (strict JSON), `AudioRoutePolicy`, `BuiltinAction` |
 | `Sources/pressy/` | `HeadsetButton` (IOKit HID), `AudioHardware` + `AudioRouteGuard` (CoreAudio), `ActionRunner`, `Log`, CLI in `main.swift` |
 | `Support/Info.plist` | linked into the binary (`-sectcreate`), gives it the bundle id `li.sudo.pressy` for the privacy settings |
-| `scripts/` | install / uninstall; the LaunchAgent plist is generated by `install.sh` |
+| `scripts/` | install / uninstall (the LaunchAgent plist is generated by `install.sh`), `make-signing-cert.sh` |
 | `Tests/PressyCoreTests/` | swift-testing suites for the three core types |
 
 ## Development

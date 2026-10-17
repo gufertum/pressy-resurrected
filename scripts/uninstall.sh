@@ -11,4 +11,4 @@ rm -f "$PLIST" "$PREFIX/bin/pressy"
 
 echo "removed LaunchAgent $LABEL and $PREFIX/bin/pressy"
 echo "kept: ${XDG_CONFIG_HOME:-$HOME/.config}/pressy/ and ~/Library/Logs/pressy.log"
-echo "privacy entries: tccutil reset All $LABEL"
+echo "privacy entries: remove pressy with - in System Settings > Privacy & Security > Input Monitoring"

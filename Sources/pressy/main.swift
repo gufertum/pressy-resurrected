@@ -66,6 +66,20 @@ func missingShortcuts(_ config: Config) -> [String]? {
     return wanted.filter { !installed.contains($0) }.sorted()
 }
 
+/// IOHIDCheckAccess keeps answering "not granted" inside a process that started without the
+/// permission (macOS 27), so a fresh `pressy input-access` is asked instead.
+func inputMonitoringGrantedInFreshProcess() -> Bool {
+    guard let executable = Bundle.main.executableURL else { return false }
+    let process = Process()
+    process.executableURL = executable
+    process.arguments = ["input-access"]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do { try process.run() } catch { return false }
+    process.waitUntilExit()
+    return process.terminationStatus == 0
+}
+
 func accessName(_ access: IOHIDAccessType) -> String {
     switch access {
     case kIOHIDAccessTypeGranted: "granted"
@@ -141,18 +155,19 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
     }
     Log.info("listening", ["device": "Headset", "seized": true])
 
-    // Without Input Monitoring the seized device opens fine but delivers no values. The grant only
-    // applies to a fresh process, so wait for it and exit; launchd starts pressy again.
+    // Without Input Monitoring the seized device opens fine but delivers no values. Once granted, presses
+    // flow, but this process keeps seeing "not granted" (macOS 27), so a fresh child is polled; seen
+    // granted, pressy exits and launchd starts it again with a state and log that match.
     var accessPoll: DispatchSourceTimer?
     if IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) != kIOHIDAccessTypeGranted {
         IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
         Log.warn("input monitoring not granted, presses will not arrive",
                  ["fix": "System Settings > Privacy & Security > Input Monitoring > allow pressy"])
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.schedule(deadline: .now() + 3, repeating: 3)
         timer.setEventHandler {
-            guard IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted else { return }
-            Log.info("input monitoring granted, exiting so it takes effect", ["exit": Exit.restart])
+            guard inputMonitoringGrantedInFreshProcess() else { return }
+            Log.info("input monitoring granted, restarting", ["exit": Exit.restart])
             exit(Exit.restart)
         }
         timer.resume()
@@ -232,6 +247,10 @@ case ("actions", 1):
     for builtin in BuiltinAction.allCases {
         print("\(builtin.rawValue.padding(toLength: 20, withPad: " ", startingAt: 0)) \(builtin.summary)")
     }
+case ("input-access", 1): // internal: used by the daemon to see a permission granted after it started
+    let access = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+    print(accessName(access))
+    exit(access == kIOHIDAccessTypeGranted ? Exit.ok : Exit.failure)
 case ("version", 1), ("--version", 1): print(version)
 case ("help", 1), ("--help", 1), ("-h", 1), (nil, _): print(usage)
 default: fail("unknown command \(arguments.joined(separator: " "))\n\n\(usage)", code: Exit.usage)

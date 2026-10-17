@@ -10,14 +10,21 @@ CONFIG="${PRESSY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pressy/config.json}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/pressy.log"
 DOMAIN="gui/$(id -u)"
+SIGN_IDENTITY="${PRESSY_SIGN_IDENTITY:-pressy local signing}"
 
 cd "$(dirname "$0")/.."
 
 swift build -c release
 install -d "$PREFIX/bin"
 install -m 755 .build/release/pressy "$BIN"
-# Ad-hoc signature with the bundle id from the embedded Info.plist; macOS privacy settings list it as "pressy".
-codesign --force --sign - --identifier "$LABEL" "$BIN"
+# Signed with the bundle id from the embedded Info.plist; macOS privacy settings list it as "pressy".
+# The local certificate (scripts/make-signing-cert.sh) keeps privacy grants across rebuilds, ad-hoc does not.
+if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
+  codesign --force --sign "$SIGN_IDENTITY" --identifier "$LABEL" "$BIN"
+else
+  echo "warning: no \"$SIGN_IDENTITY\" identity (make cert), signing ad-hoc: privacy grants are lost with every build" >&2
+  codesign --force --sign - --identifier "$LABEL" "$BIN"
+fi
 
 if [[ ! -f "$CONFIG" ]]; then
   install -d "$(dirname "$CONFIG")"
