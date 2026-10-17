@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Builds pressy and the menu bar app, installs ~/.local/bin/pressy and ~/Applications/Pressy.app,
-# creates a config from the example if there is none, and (re)loads the LaunchAgents
-# li.sudo.pressy (daemon) and li.sudo.pressy.bar (menu bar app).
+# Installs ~/.local/bin/pressy and ~/Applications/Pressy.app, creates a config from the example if
+# there is none, and (re)loads the LaunchAgents li.sudo.pressy (daemon) and li.sudo.pressy.bar (menu bar app).
+# In a source checkout it builds and signs first; in an unpacked release (bin/pressy next to scripts/)
+# it installs the signed release files as they are.
 set -euo pipefail
 
 LABEL=li.sudo.pressy
@@ -31,12 +32,18 @@ else
   [[ -f "$CONFIG_DIR/config.json" ]] && MIGRATE_JSON="$CONFIG_DIR/config.json"
 fi
 
-# The local certificate (make cert) keeps privacy grants across rebuilds, ad-hoc does not.
-if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
-  SIGN="$SIGN_IDENTITY"
+if [[ -f Package.swift ]]; then
+  FROM_SOURCE=1
+  # The local certificate (make cert) keeps privacy grants across rebuilds, ad-hoc does not.
+  if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
+    SIGN="$SIGN_IDENTITY"
+  else
+    echo "warning: no \"$SIGN_IDENTITY\" identity (make cert), signing ad-hoc: privacy grants are lost with every build" >&2
+    SIGN=-
+  fi
 else
-  echo "warning: no \"$SIGN_IDENTITY\" identity (make cert), signing ad-hoc: privacy grants are lost with every build" >&2
-  SIGN=-
+  FROM_SOURCE=
+  [[ -x bin/pressy && -d Pressy.app ]] || { echo "error: neither a source checkout nor an unpacked release: $(pwd)" >&2; exit 1; }
 fi
 
 # write_agent LABEL LOGFILE PROGRAM [ARGS...]: LaunchAgent started at login, restarted after a crash.
@@ -86,12 +93,25 @@ EOF
   launchctl bootstrap "$DOMAIN" "$AGENTS/$label.plist"
 }
 
-swift build -c release
+if [[ -n "$FROM_SOURCE" ]]; then
+  swift build -c release
+  BIN_SRC=.build/release/pressy
+  # The menu bar app is a plain bundle around the PressyBar executable.
+  APP_SRC=.build/Pressy.app
+  rm -rf "$APP_SRC"
+  install -d "$APP_SRC/Contents/MacOS"
+  install -m 755 .build/release/PressyBar "$APP_SRC/Contents/MacOS/PressyBar"
+  cp Support/PressyBar-Info.plist "$APP_SRC/Contents/Info.plist"
+  # Signed with the bundle ids from the Info.plists; privacy settings list them as "pressy" and "Pressy".
+  codesign --force --sign "$SIGN" --identifier "$LABEL" "$BIN_SRC"
+  codesign --force --sign "$SIGN" "$APP_SRC"
+else
+  BIN_SRC=bin/pressy
+  APP_SRC=Pressy.app
+fi
 
-# Daemon. Signed with the bundle id from its embedded Info.plist; privacy settings list it as "pressy".
 install -d "$PREFIX/bin"
-install -m 755 .build/release/pressy "$BIN"
-codesign --force --sign "$SIGN" --identifier "$LABEL" "$BIN"
+install -m 755 "$BIN_SRC" "$BIN"
 
 if [[ -n "$MIGRATE_JSON" ]]; then
   "$BIN" convert "$MIGRATE_JSON" "$CONFIG"
@@ -104,11 +124,9 @@ elif [[ ! -f "$CONFIG" ]]; then
 fi
 "$BIN" check --config "$CONFIG"
 
-# Menu bar app: a plain bundle around the PressyBar executable.
-install -d "$APP/Contents/MacOS" "$AGENTS" "$(dirname "$LOG")"
-install -m 755 .build/release/PressyBar "$APP/Contents/MacOS/PressyBar"
-cp Support/PressyBar-Info.plist "$APP/Contents/Info.plist"
-codesign --force --sign "$SIGN" "$APP"
+install -d "$AGENTS" "$(dirname "$LOG")" "$(dirname "$APP")"
+rm -rf "$APP"
+ditto "$APP_SRC" "$APP"
 
 write_agent "$LABEL" "$LOG" "$BIN" run --config "$CONFIG"
 write_agent "$APP_LABEL" "$HOME/Library/Logs/pressy-bar.log" "$APP/Contents/MacOS/PressyBar"

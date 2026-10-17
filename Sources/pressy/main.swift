@@ -4,7 +4,7 @@ import Foundation
 import IOKit.hid
 import PressyCore
 
-let version = "0.3.0"
+let version = "0.4.0"
 let launchAgentLabel = "li.sudo.pressy"
 
 enum Exit {

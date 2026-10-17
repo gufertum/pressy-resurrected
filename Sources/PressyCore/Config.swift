@@ -163,7 +163,7 @@ public struct Config: Equatable, Sendable {
             String(decoding: try! JSONSerialization.data(withJSONObject: text, options: [.fragmentsAllowed, .withoutEscapingSlashes]), as: UTF8.self)
         }
         var lines = [
-            "# pressy configuration, see https://git.sudo.li/lab/pressy-resurrected",
+            "# pressy configuration, see https://github.com/gufertum/pressy-resurrected",
             "# Patterns: \".\" short press, \"-\" long press, up to \(PressTiming.maxLength) presses. Keep them quoted.",
             "",
             "longPressMs: \(Int((timing.longPress * 1000).rounded()))",
