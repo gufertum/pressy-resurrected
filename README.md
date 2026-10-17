@@ -8,6 +8,10 @@
 
 [Pressy](https://en.wikipedia.org/wiki/Pressy_Button) was a 2014 Kickstarter gadget: a tiny button that sits in the headphone jack and triggers actions on Android phones. The company and its app are long gone. `pressy` is a small macOS daemon that makes the button useful again: press patterns like `.`, `..`, `-` or `.-` run shell commands, Apple Shortcuts or built-in actions such as Spotify play/pause, next track or microphone mute.
 
+https://github.com/user-attachments/assets/441d08d7-cca0-4219-b76d-5032864f286f
+
+*Sound on: a click plays and pauses Spotify, holding the button fires Raycast confetti.*
+
 <p align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-dark.png">

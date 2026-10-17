@@ -199,7 +199,7 @@ final class AppModel {
             "...": [.keys(try! KeyCombo(parsing: "shift+cmd+4"))],
         ]
         config = sample
-        daemon = DaemonState(version: "0.4.0", pid: 4711, inputMonitoring: true, jack: true, config: configURL.path)
+        daemon = DaemonState(version: "0.4.1", pid: 4711, inputMonitoring: true, jack: true, config: configURL.path)
         shortcuts = ["Focus: Deep Work", "Log water", "Start timer"]
         // Oldest first; the list shows the newest on top.
         record(.press, "press 174 ms", ok: true)
