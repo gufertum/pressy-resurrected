@@ -5,6 +5,8 @@ import SwiftUI
 /// validates, writes the config and restarts the daemon.
 struct ConfigEditor: View {
     let model: AppModel
+    /// Pattern page to open first (screenshots); nil opens General.
+    var initialPattern: String?
 
     private enum Item: Hashable { case general, pattern(UUID) }
 
@@ -72,6 +74,9 @@ struct ConfigEditor: View {
         model.reload()
         draft = ConfigDraft(model.config)
         saved = draft
+        if let initialPattern, let page = draft.patterns.first(where: { $0.pattern == initialPattern }) {
+            selection = .pattern(page.id)
+        }
         if selectedIndex == nil { selection = .general }
     }
 
@@ -140,7 +145,11 @@ private struct PatternPage: View {
         Form {
             Section("Pattern") {
                 HStack {
-                    TextField("Pattern", text: $pattern.pattern).font(.title3.monospaced())
+                    TextField("Pattern", text: $pattern.pattern, prompt: Text(". or -"))
+                        .labelsHidden()
+                        .font(.title2.monospaced().bold())
+                        .frame(maxWidth: 180)
+                    Spacer()
                     Button("+ short") { pattern.pattern += "." }
                     Button("+ long") { pattern.pattern += "-" }
                     Button("Clear") { pattern.pattern = "" }

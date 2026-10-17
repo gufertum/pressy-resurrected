@@ -44,7 +44,15 @@ final class AppModel {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var awaitingPong = false
 
-    init() {
+    /// Demo mode shows fixed sample data and touches neither the config file nor the daemon (screenshots).
+    @ObservationIgnored private let demo: Bool
+
+    init(demo: Bool = false) {
+        self.demo = demo
+        if demo {
+            loadDemo()
+            return
+        }
         reload()
         observeDaemon()
         ping()
@@ -52,6 +60,7 @@ final class AppModel {
     }
 
     func reload() {
+        guard !demo else { return }
         do {
             config = try Config.load(from: configURL)
             loadError = nil
@@ -62,6 +71,7 @@ final class AppModel {
 
     /// Validates by parsing what will be written, writes atomically in the file's format, then restarts the daemon.
     func save(_ draft: Config) throws {
+        guard !demo else { return }
         let format = ConfigFormat(url: configURL)
         let data = draft.encoded(as: format)
         _ = try Config.parse(data, format: format)
@@ -74,6 +84,7 @@ final class AppModel {
     }
 
     func restartDaemon() {
+        guard !demo else { return }
         let (status, output) = Self.run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/\(Self.daemonLabel)"])
         if status == 0 {
             record(.info, "daemon restarted", ok: true)
@@ -99,6 +110,7 @@ final class AppModel {
     }
 
     func ping() {
+        guard !demo else { return }
         awaitingPong = true
         PressyEvent.post(PressyEvent.ping, [:])
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
@@ -173,6 +185,30 @@ final class AppModel {
         default:
             break
         }
+    }
+
+    private func loadDemo() {
+        var sample = Config()
+        sample.patterns = [
+            ".": [.builtin(.spotifyPlayPause)],
+            "..": [.builtin(.spotifyNext)],
+            "-": [.sound("Tink"), .builtin(.inputToggleMute)],
+            ".-": [.raycast("raycast://confetti")],
+            "-.": [.shortcut("Focus: Deep Work")],
+            "--": [.builtin(.systemLock)],
+            "...": [.keys(try! KeyCombo(parsing: "shift+cmd+4"))],
+        ]
+        config = sample
+        daemon = DaemonState(version: "0.4.0", pid: 4711, inputMonitoring: true, jack: true, config: configURL.path)
+        shortcuts = ["Focus: Deep Work", "Log water", "Start timer"]
+        // Oldest first; the list shows the newest on top.
+        record(.press, "press 174 ms", ok: true)
+        record(.pattern, ".  →  builtin spotify.playpause", ok: true)
+        record(.action, "builtin spotify.playpause done in 118 ms", ok: true)
+        record(.press, "press 158 ms", ok: true)
+        record(.press, "press 612 ms", ok: true)
+        record(.pattern, ".-  →  raycast \"raycast://confetti\"", ok: true)
+        record(.action, "raycast \"raycast://confetti\" done in 41 ms", ok: true)
     }
 
     private func record(_ kind: ActivityItem.Kind, _ text: String, ok: Bool) {
