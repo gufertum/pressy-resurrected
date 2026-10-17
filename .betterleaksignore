@@ -1,0 +1,7 @@
+# SDK header index records in ignored .build/ output (Swift compiler), not credentials
+.build/out/v5/records/6K/NSURLCredential.h-2XEZB5AUDYJ6K:generic-password:26
+.build/out/v5/records/RL/arm64e-apple-macos.swiftinterface-3FHWUD754JMRL:generic-password:158
+.build/out/v5/records/RL/arm64e-apple-macos.swiftinterface-3FHWUD754JMRL:generic-password:159
+.build/out/v5/records/RL/arm64e-apple-macos.swiftinterface-3FHWUD754JMRL:generic-password:181
+.build/out/v5/records/ZM/NSURL.h-1ROC0YYMYOSZM:generic-password:42
+.build/out/v5/records/ZM/NSURL.h-1ROC0YYMYOSZM:generic-password:47
