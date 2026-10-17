@@ -2,6 +2,10 @@
 
 **Your old Pressy button, alive again - on a Mac.**
 
+[![Release](https://img.shields.io/github/v/release/gufertum/pressy-resurrected)](https://github.com/gufertum/pressy-resurrected/releases/latest)
+![macOS 14+ on Apple silicon](https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20silicon-black)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 [Pressy](https://en.wikipedia.org/wiki/Pressy_Button) was a 2014 Kickstarter gadget: a tiny button that sits in the headphone jack and triggers actions on Android phones. The company and its app are long gone. `pressy` is a small macOS daemon that makes the button useful again: press patterns like `.`, `..`, `-` or `.-` run shell commands, Apple Shortcuts or built-in actions such as Spotify play/pause, next track or microphone mute.
 
 Tested on a MacBook Pro M5 (Mac17,2) with macOS 27.0.1. It should work on any Apple silicon Mac whose 3.5 mm jack takes headsets.
@@ -14,12 +18,39 @@ Tested on a MacBook Pro M5 (Mac17,2) with macOS 27.0.1. It should work on any Ap
 ## Quick start
 
 ```bash
-xcode-select --install          # once, if the Command Line Tools are missing
-git clone ssh://git@git.sudo.li:222/lab/pressy-resurrected.git
-cd pressy-resurrected
-make cert                       # once: local code-signing certificate, keeps permissions across updates
-make install                    # tests, builds, installs ~/.local/bin/pressy, ~/Applications/Pressy.app and their LaunchAgents
+curl -fsSL https://raw.githubusercontent.com/gufertum/pressy-resurrected/main/get-pressy.sh | bash
 ```
+
+That downloads the latest [release](https://github.com/gufertum/pressy-resurrected/releases/latest), checks its sha256, and installs `~/.local/bin/pressy`, `~/Applications/Pressy.app` and their LaunchAgents. Your config is left alone if you have one. Rather read before you pipe into a shell? Same thing in three steps:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/gufertum/pressy-resurrected/main/get-pressy.sh
+less get-pressy.sh
+bash get-pressy.sh
+```
+
+<details>
+<summary>Other ways to install</summary>
+
+**Release zip by hand.** Download `pressy-<version>-macos-arm64.zip` from the releases page, compare it with the `.sha256` file, unpack it, then:
+
+```bash
+xattr -dr com.apple.quarantine pressy-*/   # a browser download is quarantined, see below
+pressy-*/scripts/install.sh
+```
+
+**From source** (needs the Command Line Tools: `xcode-select --install`):
+
+```bash
+git clone https://github.com/gufertum/pressy-resurrected.git
+cd pressy-resurrected
+make cert        # once: local code-signing certificate, keeps permissions across rebuilds
+make install     # tests, builds, signs, installs
+```
+
+**About signing.** The releases are signed with the maintainer's self-signed certificate. They are not notarized, because that needs a paid Apple Developer ID. `curl` does not mark downloads as quarantined, so Gatekeeper does not get involved. Files downloaded with a browser are marked; `xattr` above removes the mark. Every release carries the same signature, so macOS keeps your permissions across updates. To update, run the one-liner again.
+
+</details>
 
 1. Plug the Pressy into the headphone jack.
 2. Allow **Input Monitoring** for `pressy` when macOS asks; without it the button stays silent. Step by step: [Permissions](#permissions).
@@ -30,8 +61,9 @@ make install                    # tests, builds, installs ~/.local/bin/pressy, ~
 | once | `.` | Spotify play/pause |
 | twice | `..` | Spotify next track |
 | three times | `...` | Spotify previous track |
-| hold (half a second) | `-` | mute / unmute the microphone |
-| short, then hold | `.-` | your Mac says "Pressy is alive" |
+| hold (half a second) | `-` | a "Tink", then mute / unmute the microphone |
+| short, then hold | `.-` | Raycast confetti (if you have Raycast) |
+| hold, then short | `-.` | your Mac says "Pressy is alive" |
 
 The first Spotify press asks whether `pressy` may control Spotify: allow it.
 
@@ -208,8 +240,14 @@ All commands take `--config PATH`. Exit codes: `0` ok, `1` action or check faile
 Remove everything, including the certificate and the privacy entries:
 
 ```bash
-make uninstall && rm -rf ~/.config/pressy ~/Library/Logs/pressy.log
-security delete-identity -c "pressy local signing"
+make uninstall && rm -rf ~/.config/pressy ~/Library/Logs/pressy*.log
+security delete-identity -c "pressy local signing"   # only if you ran make cert
+```
+
+Installed with the one-liner, without a checkout:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gufertum/pressy-resurrected/main/scripts/uninstall.sh | bash
 ```
 
 Then remove **pressy** with **−** under System Settings > Privacy & Security > Input Monitoring (and Accessibility, if you used `media.*`).
@@ -408,6 +446,7 @@ flowchart LR
 ```bash
 make test       # swift test; with only the Command Line Tools it adds the swift-testing plugin path
 make build      # release build in .build/release/pressy
+make release    # dist/pressy-<version>-macos-arm64.zip + .sha256, signed with the local certificate
 .build/release/pressy trigger .. --config config.example.yaml   # try an action without the button
 ```
 
