@@ -9,13 +9,27 @@ APP_LABEL=li.sudo.pressy.bar
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN="$PREFIX/bin/pressy"
 APP="${PRESSY_APP:-$HOME/Applications/Pressy.app}"
-CONFIG="${PRESSY_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pressy/config.json}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/pressy"
 AGENTS="$HOME/Library/LaunchAgents"
 LOG="$HOME/Library/Logs/pressy.log"
 DOMAIN="gui/$(id -u)"
 SIGN_IDENTITY="${PRESSY_SIGN_IDENTITY:-pressy local signing}"
 
 cd "$(dirname "$0")/.."
+
+# Same lookup as the daemon: $PRESSY_CONFIG, else config.yaml, config.yml, config.json. A config.json
+# alone is converted to config.yaml once (below, with the new binary) and kept as config.json.bak.
+MIGRATE_JSON=
+if [[ -n "${PRESSY_CONFIG:-}" ]]; then
+  CONFIG="$PRESSY_CONFIG"
+elif [[ -f "$CONFIG_DIR/config.yaml" ]]; then
+  CONFIG="$CONFIG_DIR/config.yaml"
+elif [[ -f "$CONFIG_DIR/config.yml" ]]; then
+  CONFIG="$CONFIG_DIR/config.yml"
+else
+  CONFIG="$CONFIG_DIR/config.yaml"
+  [[ -f "$CONFIG_DIR/config.json" ]] && MIGRATE_JSON="$CONFIG_DIR/config.json"
+fi
 
 # The local certificate (make cert) keeps privacy grants across rebuilds, ad-hoc does not.
 if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
@@ -62,7 +76,13 @@ EOF
 </plist>
 EOF
   } > "$AGENTS/$label.plist"
-  launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+  # bootout returns before the job is gone; bootstrapping too early fails with "5: Input/output error".
+  if launchctl bootout "$DOMAIN/$label" 2>/dev/null; then
+    for _ in $(seq 50); do
+      launchctl print "$DOMAIN/$label" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+  fi
   launchctl bootstrap "$DOMAIN" "$AGENTS/$label.plist"
 }
 
@@ -73,10 +93,14 @@ install -d "$PREFIX/bin"
 install -m 755 .build/release/pressy "$BIN"
 codesign --force --sign "$SIGN" --identifier "$LABEL" "$BIN"
 
-if [[ ! -f "$CONFIG" ]]; then
+if [[ -n "$MIGRATE_JSON" ]]; then
+  "$BIN" convert "$MIGRATE_JSON" "$CONFIG"
+  mv "$MIGRATE_JSON" "$MIGRATE_JSON.bak"
+  echo "converted $MIGRATE_JSON to $CONFIG (old file kept as $MIGRATE_JSON.bak)"
+elif [[ ! -f "$CONFIG" ]]; then
   install -d "$(dirname "$CONFIG")"
-  cp config.example.json "$CONFIG"
-  echo "created $CONFIG from config.example.json"
+  cp config.example.yaml "$CONFIG"
+  echo "created $CONFIG from config.example.yaml"
 fi
 "$BIN" check --config "$CONFIG"
 

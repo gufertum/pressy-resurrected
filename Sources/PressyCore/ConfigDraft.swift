@@ -89,7 +89,7 @@ public struct ConfigDraft: Equatable, Sendable {
             }
         }
         // The parser also enforces the ranges of the numbers.
-        return try Config.parse(config.jsonData())
+        return try Config.parse(config.jsonData(), format: .json)
     }
 
     static func patterns(ofLength length: Int) -> [String] {

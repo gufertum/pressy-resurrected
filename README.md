@@ -47,7 +47,7 @@ Your sound stays on the speakers and your mic stays the built-in one, even thoug
 - the live activity: each press with its duration, the recognised pattern and every action's result
 - the current configuration
 
-**Edit…** (<kbd>⌘</kbd><kbd>,</kbd>) opens the editor: a page per pattern and one for the general settings. For each action, pick its type and then the value: built-ins from a grouped list, Shortcuts from your Shortcuts library, a script or sound file through a file picker, key combinations with **Record** (click, then press the keys), Raycast deeplinks from examples. **Test now** runs a pattern's actions once without saving. **Save & apply** validates everything, writes `config.json` and restarts the daemon. The editor rewrites the file in its own sorted format.
+**Edit…** (<kbd>⌘</kbd><kbd>,</kbd>) opens the editor: a page per pattern and one for the general settings. For each action, pick its type and then the value: built-ins from a grouped list, Shortcuts from your Shortcuts library, a script or sound file through a file picker, key combinations with **Record** (click, then press the keys), Raycast deeplinks from examples. **Test now** runs a pattern's actions once without saving. **Save & apply** validates everything, writes the config file (in its format, YAML or JSON) and restarts the daemon. The editor rewrites the file in its own tidy format, so comments you added by hand are lost.
 
 The app is optional: it only edits the config file and listens to the daemon. It starts at login (LaunchAgent `li.sudo.pressy.bar`); **Quit Pressy menu** in its ⋯ menu stops it until the next login.
 
@@ -76,7 +76,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/li.sudo.pressy.plist
 
 ### Configure
 
-The config lives in `~/.config/pressy/config.json` (or wherever `$PRESSY_CONFIG` points). `make install` creates it from [config.example.json](config.example.json). After editing:
+The config lives in `~/.config/pressy/config.yaml` (or wherever `$PRESSY_CONFIG` points). `make install` creates it from [config.example.yaml](config.example.yaml). After editing:
 
 ```bash
 pressy reload                   # validates the config first, then restarts the agent
@@ -84,21 +84,29 @@ pressy reload                   # validates the config first, then restarts the 
 
 A broken config is rejected with the exact spot (`patterns[".."]: unknown key "shorcut"`), and the running daemon keeps going.
 
-```json
-{
-  "longPressMs": 500,
-  "sequenceGapMs": 400,
-  "restoreAudioRoute": true,
-  "actionTimeoutSeconds": 30,
-  "patterns": {
-    ".":   { "builtin": "spotify.playpause" },
-    "..":  { "shortcut": "Toggle Focus" },
-    "-":   { "builtin": "input.togglemute" },
-    ".-":  { "run": "open -a 'Visual Studio Code'" },
-    "--":  { "run": "~/bin/pressy-hook.sh" }
-  }
-}
+```yaml
+longPressMs: 500
+sequenceGapMs: 400
+restoreAudioRoute: true
+actionTimeoutSeconds: 30
+
+patterns:
+  ".":   { builtin: spotify.playpause }
+  "..":  { shortcut: Toggle Focus }
+  "-":   { builtin: input.togglemute }
+  ".-":  { run: "open -a 'Visual Studio Code'" }
+  "--":  { script: ~/bin/pressy-hook.sh }
 ```
+
+**Always quote the patterns.** A bare `-` starts a YAML list, and pressy then tells you so. Values with `:`, `#` or quotes in them need quotes too; the menu bar editor writes every value quoted.
+
+**Prefer JSON?** Name the file `config.json` (or point `$PRESSY_CONFIG` at any `.json` file); same keys, same validation:
+
+```json
+{ "longPressMs": 500, "patterns": { ".": { "builtin": "spotify.playpause" }, "-": [{ "sound": "Tink" }, { "builtin": "input.togglemute" }] } }
+```
+
+pressy uses the first existing of `config.yaml`, `config.yml`, `config.json`. `pressy convert config.json config.yaml` converts between the formats; `make install` does that once for an old `config.json` (kept as `config.json.bak`).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -116,21 +124,26 @@ Each action has exactly one of these keys:
 
 | Action | Does |
 |---|---|
-| `{"builtin": "<name>"}` | one of the built-in actions below |
-| `{"shortcut": "<name>"}` | runs an Apple Shortcut by its exact name (`shortcuts run`) |
-| `{"script": "<path>"}` | runs an executable file (`~` allowed, needs `chmod +x`) |
-| `{"run": "<command>"}` | runs the command in a zsh login shell (`/bin/zsh -lc`), so your `PATH` from `.zprofile` applies |
-| `{"keys": "<combo>"}` | presses a key combination, e.g. `cmd+shift+4`, `ctrl+cmd+q`, `opt+space`, `f5` (needs Accessibility) |
-| `{"raycast": "<deeplink>"}` | opens a Raycast deeplink: `confetti`, `extensions/raycast/clipboard-history/clipboard-history`, any `raycast://...` |
-| `{"sound": "<name or file>"}` | plays a system sound (`Glass`, `Ping`, `Submarine`, ... from `/System/Library/Sounds`) or any audio file |
+| `builtin: <name>` | one of the built-in actions below |
+| `shortcut: <name>` | runs an Apple Shortcut by its exact name (`shortcuts run`) |
+| `script: <path>` | runs an executable file (`~` allowed, needs `chmod +x`) |
+| `run: <command>` | runs the command in a zsh login shell (`/bin/zsh -lc`), so your `PATH` from `.zprofile` applies |
+| `keys: <combo>` | presses a key combination, e.g. `cmd+shift+4`, `ctrl+cmd+q`, `opt+space`, `f5` (needs Accessibility) |
+| `raycast: <deeplink>` | opens a Raycast deeplink: `confetti`, `extensions/raycast/clipboard-history/clipboard-history`, any `raycast://...` |
+| `sound: <name or file>` | plays a system sound (`Glass`, `Ping`, `Submarine`, ... from `/System/Library/Sounds`) or any audio file |
 
 `script` and `run` get the pattern in `PRESSY_PATTERN`. `pressy check` verifies that Shortcuts, scripts and sounds exist and that an app handles `raycast://`.
 
 **Several actions per pattern.** Use a list; the actions run one after another. A sound only starts, so it never delays what follows:
 
-```json
-"-":   [{ "sound": "Tink" }, { "builtin": "input.togglemute" }],
-"--":  [{ "keys": "cmd+c" }, { "keys": "cmd+tab" }, { "keys": "cmd+v" }]
+```yaml
+  "-":
+    - sound: Tink
+    - builtin: input.togglemute
+  "--":
+    - keys: cmd+c
+    - keys: cmd+tab
+    - keys: cmd+v
 ```
 
 **Key combinations.** Modifiers `cmd`, `shift`, `ctrl`, `opt` (or `alt`), `fn`, joined with `+`. The last part is a character (`a`, `4`, `/`, written `plus` for `+`) or a named key: `return`, `tab`, `space`, `escape`, `delete`, `forwarddelete`, `left`, `right`, `up`, `down`, `home`, `end`, `pageup`, `pagedown`, `f1` to `f20`. Characters follow your current keyboard layout, so `cmd+z` is undo on QWERTZ as well. Any macOS or app shortcut works this way.
@@ -159,11 +172,10 @@ Focus / Do Not Disturb and Wi-Fi have no stable command-line interface; build a 
 
 **Ideas for `run`:**
 
-```json
-".-":  { "run": "osascript -e 'display notification \"Pressy pressed\" with title \"pressy\"'" },
-"-.":  { "run": "pmset displaysleepnow" },
-"---": { "run": "curl -fsS -m 5 -X POST http://homeassistant.local:8123/api/webhook/pressy" },
-"--":  { "run": "~/bin/pressy-hook.sh" }
+```yaml
+  ".-":  { run: "osascript -e 'display notification \"Pressy pressed\" with title \"pressy\"'" }
+  "---": { run: "curl -fsS -m 5 -X POST http://homeassistant.local:8123/api/webhook/pressy" }
+  "--":  { script: ~/bin/pressy-hook.sh }
 ```
 
 One script for everything, switching on the pattern:
@@ -187,6 +199,7 @@ esac
 | `pressy reload` | `check`, then restarts the LaunchAgent |
 | `pressy trigger <pattern>` | runs the mapped action once without pressing; exit code = result |
 | `pressy actions` | lists the built-in actions |
+| `pressy convert <in> <out>` | rewrites a config in the format of `<out>`'s extension |
 
 All commands take `--config PATH`. Exit codes: `0` ok, `1` action or check failed, `64` usage, `69` Headset device missing or held by another pressy, `75` restart requested (new permission), `78` config error.
 
@@ -352,7 +365,7 @@ pressy only undoes a switch to a jack device that appeared within the last 5 sec
 flowchart LR
   D["pressy daemon<br/>li.sudo.pressy"] -->|"li.sudo.pressy.press / .pattern / .action / .state"| A["Pressy.app<br/>li.sudo.pressy.bar"]
   A -->|"li.sudo.pressy.ping"| D
-  A -->|"writes, validated"| C["~/.config/pressy/config.json"]
+  A -->|"writes, validated"| C["~/.config/pressy/config.yaml"]
   A -->|"launchctl kickstart -k"| D
   C -->|"read at start"| D
 ```
@@ -383,7 +396,7 @@ flowchart LR
 
 | Path | Contents |
 |---|---|
-| `Sources/PressyCore/` | `PatternRecognizer`, `Config` (strict JSON), `ConfigDraft` (editor model), `KeyCombo`, `BuiltinAction` (table), `AudioRoutePolicy`, `PressyEvent` (daemon -> app contract) |
+| `Sources/PressyCore/` | `PatternRecognizer`, `Config` (strict YAML / JSON), `ConfigDraft` (editor model), `KeyCombo`, `BuiltinAction` (table), `AudioRoutePolicy`, `PressyEvent` (daemon -> app contract) |
 | `Sources/PressyBar/` | the menu bar app (SwiftUI `MenuBarExtra`): `AppModel`, `ConfigEditor`, `ActionRow` with the key recorder |
 | `Sources/pressy/` | `HeadsetButton` (IOKit HID), `AudioHardware` + `AudioRouteGuard` (CoreAudio), `ActionRunner`, `Log`, CLI in `main.swift` |
 | `Support/Info.plist` | linked into the binary (`-sectcreate`), gives it the bundle id `li.sudo.pressy` for the privacy settings |
@@ -395,7 +408,7 @@ flowchart LR
 ```bash
 make test       # swift test; with only the Command Line Tools it adds the swift-testing plugin path
 make build      # release build in .build/release/pressy
-.build/release/pressy trigger .. --config config.example.json   # try an action without the button
+.build/release/pressy trigger .. --config config.example.yaml   # try an action without the button
 ```
 
-Swift 6 language mode, no dependencies. Builds with the Command Line Tools alone: the Makefile adds the swift-testing plugin path, and the app uses `@Local` (a thin wrapper around `SwiftUI.State`) because `@State` is a macro in the macOS 27 SDK whose plugin ships only with Xcode. So long, and thanks for all the clicks.
+Swift 6 language mode; one dependency, [Yams](https://github.com/jpsim/Yams) for reading YAML. Builds with the Command Line Tools alone: the Makefile adds the swift-testing plugin path, and the app uses `@Local` (a thin wrapper around `SwiftUI.State`) because `@State` is a macro in the macOS 27 SDK whose plugin ships only with Xcode. So long, and thanks for all the clicks.
