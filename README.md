@@ -133,6 +133,17 @@ Each action has exactly one of these keys:
 | `output.togglemute` | mutes / unmutes the current output device |
 | `output.volumeup`, `output.volumedown` | output volume one step (1/16); up also unmutes |
 | `input.togglemute` | mutes / unmutes the current microphone, a hardware mute button for calls |
+| `appearance.toggle`, `appearance.dark`, `appearance.light` | dark / light mode (asks once to control System Events) |
+| `display.sleep` | turns the displays off; locks when a password is required after sleep |
+| `system.sleep` | puts the Mac to sleep |
+| `system.lock` | locks the screen (⌃⌘Q) |
+| `screensaver.start` | starts the screen saver |
+| `screenshot.tool` | opens the screenshot tool (⇧⌘5) |
+| `missioncontrol` | shows Mission Control |
+| `caffeinate.toggle` | keeps the Mac awake until pressed again (or pressy stops) |
+| `time.say` | speaks the current time |
+
+Focus / Do Not Disturb and Wi-Fi have no stable command-line interface; build a Shortcut for them and use `shortcut`. Adding a built-in yourself: one `case` in [BuiltinAction.swift](Sources/PressyCore/BuiltinAction.swift) and one line in its `definition` table (a process, an AppleScript or a key combination).
 
 **Ideas for `run`:**
 
@@ -185,7 +196,7 @@ macOS asks once per permission. All entries are called `pressy` and live in **Sy
 | Permission | Needed for | When it is asked |
 |---|---|---|
 | Input Monitoring | the button itself, always | on the first start |
-| Automation (Spotify, Music) | `spotify.*`, `music.*` | on the first such press |
+| Automation (Spotify, Music, System Events) | `spotify.*`, `music.*`, `appearance.*` | on the first such press |
 | Accessibility | `keys` and `media.*` | at start, when the config uses one of them |
 
 **Input Monitoring** (required). pressy can hold the button without it, but macOS never delivers a single press.
