@@ -149,7 +149,7 @@ struct KeyRecorder: View {
         (try? KeyCombo(parsing: text))?.symbols
     }
 
-    private static let preferredNames = ["return", "tab", "space", "delete", "escape", "forwarddelete", "home", "end",
+    nonisolated private static let preferredNames = ["return", "tab", "space", "delete", "escape", "forwarddelete", "home", "end",
                                          "pageup", "pagedown", "help", "left", "right", "down", "up"]
         + (1...20).map { "f\($0)" }
 

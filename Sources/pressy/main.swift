@@ -25,10 +25,11 @@ let usage = """
       pressy check   [--config PATH]   validate the config and the Shortcuts it names
       pressy reload  [--config PATH]   check, then restart the LaunchAgent \(launchAgentLabel)
       pressy trigger PATTERN [--config PATH]   run the action mapped to PATTERN once, e.g. pressy trigger ..
+      pressy convert IN OUT            rewrite a config in the format of OUT's extension (.yaml / .json)
       pressy actions                   list the built-in actions
 
     Patterns: "." short press, "-" long press, up to \(PressTiming.maxLength) presses, e.g. ".", "..", "-", ".-".
-    Config: $PRESSY_CONFIG, else ~/.config/pressy/config.json
+    Config: $PRESSY_CONFIG, else ~/.config/pressy/config.yaml (or config.yml / config.json if only that exists)
     """
 
 func fail(_ message: String, code: Int32) -> Never {
@@ -252,6 +253,18 @@ func mainQueueSchedule(_ delay: TimeInterval, _ work: @escaping @MainActor () ->
     return { item.cancel() }
 }
 
+func convert(_ input: String, _ output: String) -> Never {
+    let source = URL(fileURLWithPath: (input as NSString).expandingTildeInPath)
+    let target = URL(fileURLWithPath: (output as NSString).expandingTildeInPath)
+    guard !FileManager.default.fileExists(atPath: target.path) else { fail("\(target.path) exists, not overwriting", code: Exit.usage) }
+    let config = loadConfig(source)
+    do { try config.encoded(as: ConfigFormat(url: target)).write(to: target, options: .withoutOverwriting) } catch {
+        fail("\(target.path): \(error.localizedDescription)", code: Exit.failure)
+    }
+    print("wrote \(target.path)")
+    exit(Exit.ok)
+}
+
 func reload(_ url: URL) -> Never {
     _ = loadConfig(url)
     let process = Process()
@@ -280,6 +293,7 @@ case ("watch", 1): daemon(configURL, dryRun: true)
 case ("check", 1): check(configURL)
 case ("reload", 1): reload(configURL)
 case ("trigger", 2): trigger(arguments[1], configURL)
+case ("convert", 3): convert(arguments[1], arguments[2])
 case ("actions", 1):
     for builtin in BuiltinAction.allCases {
         print("\(builtin.rawValue.padding(toLength: 20, withPad: " ", startingAt: 0)) \(builtin.summary)")

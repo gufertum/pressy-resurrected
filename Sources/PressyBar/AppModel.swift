@@ -60,10 +60,11 @@ final class AppModel {
         }
     }
 
-    /// Validates by parsing what will be written, writes atomically, then restarts the daemon.
+    /// Validates by parsing what will be written, writes atomically in the file's format, then restarts the daemon.
     func save(_ draft: Config) throws {
-        let data = draft.jsonData()
-        _ = try Config.parse(data)
+        let format = ConfigFormat(url: configURL)
+        let data = draft.encoded(as: format)
+        _ = try Config.parse(data, format: format)
         try FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: configURL, options: .atomic)
         config = draft
