@@ -30,7 +30,36 @@ struct ConfigTests {
         #expect(config.timing == PressTiming(longPress: 0.6, sequenceGap: 0.35))
         #expect(config.restoreAudioRoute == false)
         #expect(config.actionTimeout == 10)
-        #expect(config.patterns == [".": .builtin(.spotifyPlayPause), "..": .shortcut("Focus"), "-.": .run("say hi")])
+        #expect(config.patterns == [".": [.builtin(.spotifyPlayPause)], "..": [.shortcut("Focus")], "-.": [.run("say hi")]])
+    }
+
+    @Test func newActionKindsAndLists() throws {
+        let config = try parse("""
+            {"patterns": {
+              ".": {"script": "~/bin/x.sh"},
+              "..": {"keys": "Cmd+Shift+4"},
+              "-": {"raycast": "confetti"},
+              "--": {"raycast": "raycast://extensions/raycast/raycast/confetti"},
+              ".-": [{"sound": "Glass"}, {"builtin": "input.togglemute"}]
+            }}
+            """)
+        #expect(config.patterns["."] == [.script("~/bin/x.sh")])
+        #expect(config.patterns[".."] == [.keys(KeyCombo(modifiers: [.cmd, .shift], key: .character("4")))])
+        #expect(config.patterns["-"] == [.raycast("raycast://confetti")])
+        #expect(config.patterns["--"] == [.raycast("raycast://extensions/raycast/raycast/confetti")])
+        #expect(config.patterns[".-"] == [.sound("Glass"), .builtin(.inputToggleMute)])
+    }
+
+    @Test func jsonDataRoundTrips() throws {
+        let original = try parse("""
+            {"longPressMs": 650, "sequenceGapMs": 300, "restoreAudioRoute": false, "actionTimeoutSeconds": 12,
+             "patterns": {".": {"keys": "ctrl+cmd+q"}, "..": [{"sound": "Glass"}, {"shortcut": "A/B"}], "-": {"raycast": "confetti"}}}
+            """)
+        let data = original.jsonData()
+        #expect(try Config.parse(data) == original)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains(#""keys" : "ctrl+cmd+q""#))
+        #expect(text.contains(#""shortcut" : "A/B""#))
     }
 
     @Test func defaultsWhenKeysAreMissing() throws {
@@ -58,6 +87,12 @@ struct ConfigTests {
         (#"{"restoreAudioRoute": 1}"#, "restoreAudioRoute: must be true or false"),
         ("[]", "top level must be a JSON object"),
         ("{", "invalid JSON"),
+        (#"{"patterns": {".": []}}"#, #"patterns["."]: the action list is empty"#),
+        (#"{"patterns": {".": [{"sound": "Glass"}, {"nope": "x"}]}}"#, #"patterns["."][1]: unknown key "nope""#),
+        (#"{"patterns": {".": {"keys": "hyper+x"}}}"#, #"patterns["."].keys "hyper+x": unknown modifier "hyper""#),
+        (#"{"patterns": {".": {"keys": "cmd+"}}}"#, #"patterns["."].keys "cmd+": write it like"#),
+        (#"{"patterns": {".": {"keys": "cmd+banana"}}}"#, #"patterns["."].keys "cmd+banana": unknown key "banana""#),
+        (#"{"patterns": {".": {"sound": 3}}}"#, #"patterns["."].sound: must be a non-empty string"#),
     ])
     func rejects(json: String, message: String) {
         let actual = error(json)

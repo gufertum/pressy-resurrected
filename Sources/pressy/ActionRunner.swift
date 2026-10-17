@@ -2,52 +2,95 @@ import AppKit
 import Foundation
 import PressyCore
 
-/// Executes actions. Child processes run asynchronously with a timeout; every outcome is logged.
+/// Executes actions. A pattern's actions run one after another; child processes run asynchronously
+/// with a timeout and every outcome is logged.
 @MainActor
 final class ActionRunner {
+    /// Reported once per finished action.
+    var onResult: ((_ pattern: String, _ action: Action, _ ok: Bool, _ millis: Int, _ detail: String) -> Void)?
+
     private let timeout: TimeInterval
 
     init(timeout: TimeInterval) { self.timeout = timeout }
 
-    /// `completion` gets `true` when the action succeeded.
-    func perform(_ action: Action, pattern: String, completion: (@MainActor (Bool) -> Void)? = nil) {
-        switch action {
-        case .run(let command):
-            spawn("/bin/zsh", ["-lc", command], label: action.description, pattern: pattern, completion: completion)
-        case .shortcut(let name):
-            spawn("/usr/bin/shortcuts", ["run", name], label: action.description, pattern: pattern, completion: completion)
-        case .builtin(let builtin):
-            if let script = Self.appleScript(for: builtin) {
-                spawn("/usr/bin/osascript", ["-e", script], label: action.description, pattern: pattern, completion: completion)
-            } else {
-                completion?(performInProcess(builtin, pattern: pattern))
-            }
+    /// Runs `actions` in order; `completion` gets `true` when all succeeded.
+    func perform(_ actions: [Action], pattern: String, completion: (@MainActor (Bool) -> Void)? = nil) {
+        guard let first = actions.first else {
+            completion?(true)
+            return
+        }
+        // Strong captures on purpose: the closures end with the action, and a caller may not keep the runner.
+        perform(first, pattern: pattern) { ok in
+            self.perform(Array(actions.dropFirst()), pattern: pattern) { rest in completion?(ok && rest) }
         }
     }
 
-    private func performInProcess(_ builtin: BuiltinAction, pattern: String) -> Bool {
+    private func perform(_ action: Action, pattern: String, completion: @escaping @MainActor (Bool) -> Void) {
+        let started = Date()
+        let finish: @MainActor (Bool, String) -> Void = { ok, detail in
+            let millis = Int(Date().timeIntervalSince(started) * 1000)
+            if ok {
+                Log.info("action done", ["pattern": pattern, "action": action.description, "ms": millis, "output": detail])
+            } else {
+                Log.error("action failed", ["pattern": pattern, "action": action.description, "ms": millis, "error": detail])
+            }
+            self.onResult?(pattern, action, ok, millis, detail)
+            completion(ok)
+        }
+
+        switch action {
+        case .run(let command):
+            spawn("/bin/zsh", ["-lc", command], pattern: pattern, finish: finish)
+        case .script(let path):
+            let expanded = SoundLibrary.expand(path)
+            guard FileManager.default.isExecutableFile(atPath: expanded) else {
+                return finish(false, "\(expanded) does not exist or is not executable (chmod +x)")
+            }
+            spawn(expanded, [], pattern: pattern, finish: finish)
+        case .shortcut(let name):
+            spawn("/usr/bin/shortcuts", ["run", name], pattern: pattern, finish: finish)
+        case .raycast(let url):
+            spawn("/usr/bin/open", ["-g", url], pattern: pattern, finish: finish)
+        case .sound(let value):
+            guard let file = SoundLibrary.resolve(value) else { return finish(false, "no sound \"\(value)\"") }
+            // Feedback sounds must not hold up the next action: report on start, log only a failed playback.
+            spawn("/usr/bin/afplay", [file.path], pattern: pattern) { ok, detail in
+                if !ok { Log.error("sound failed", ["pattern": pattern, "file": file.path, "error": detail]) }
+            }
+            finish(true, file.lastPathComponent)
+        case .keys(let combo):
+            do {
+                try Keyboard.post(combo)
+                finish(true, combo.symbols)
+            } catch {
+                finish(false, error.description)
+            }
+        case .builtin(let builtin):
+            perform(builtin, pattern: pattern, finish: finish)
+        }
+    }
+
+    private func perform(_ builtin: BuiltinAction, pattern: String, finish: @escaping @MainActor (Bool, String) -> Void) {
         do {
             switch builtin {
-            case .mediaPlayPause: try Self.postMediaKey(16) // NX_KEYTYPE_PLAY
-            case .mediaNext: try Self.postMediaKey(17) // NX_KEYTYPE_NEXT
-            case .mediaPrevious: try Self.postMediaKey(18) // NX_KEYTYPE_PREVIOUS
+            case .mediaPlayPause: try Keyboard.postMediaKey(16) // NX_KEYTYPE_PLAY
+            case .mediaNext: try Keyboard.postMediaKey(17) // NX_KEYTYPE_NEXT
+            case .mediaPrevious: try Keyboard.postMediaKey(18) // NX_KEYTYPE_PREVIOUS
             case .outputToggleMute, .inputToggleMute:
                 let result = try AudioHardware.toggleMute(input: builtin == .inputToggleMute)
-                Log.info("action done", ["pattern": pattern, "action": builtin.rawValue, "device": result.device, "muted": result.muted])
-                return true
+                return finish(true, "\(result.device) muted=\(result.muted)")
             case .outputVolumeUp, .outputVolumeDown:
                 let result = try AudioHardware.changeOutputVolume(by: builtin == .outputVolumeUp ? 1 / 16 : -1 / 16)
-                Log.info("action done", ["pattern": pattern, "action": builtin.rawValue, "device": result.device,
-                                         "volume": String(format: "%.2f", result.volume)])
-                return true
+                return finish(true, String(format: "%@ volume=%.2f", result.device, result.volume))
             default:
-                preconditionFailure("\(builtin.rawValue) runs as AppleScript")
+                guard let script = Self.appleScript(for: builtin) else { preconditionFailure("no implementation for \(builtin.rawValue)") }
+                return spawn("/usr/bin/osascript", ["-e", script], pattern: pattern, finish: finish)
             }
-            Log.info("action done", ["pattern": pattern, "action": builtin.rawValue])
-            return true
+            finish(true, "")
+        } catch let error as AudioHardwareError {
+            finish(false, error.description)
         } catch {
-            Log.error("action failed", ["pattern": pattern, "action": builtin.rawValue, "error": error])
-            return false
+            finish(false, "\(error)")
         }
     }
 
@@ -66,24 +109,7 @@ final class ActionRunner {
         return "if application \"\(app)\" is running then\ntell application \"\(app)\" to \(command)\nelse\nreturn \"\(app) is not running\"\nend if"
     }
 
-    /// Posts a system media key (down and up), which macOS routes to the app that is playing.
-    private static func postMediaKey(_ key: Int) throws(AudioHardwareError) {
-        guard CGPreflightPostEventAccess() else {
-            CGRequestPostEventAccess()
-            throw AudioHardwareError(description: "no Accessibility permission to post media keys; "
-                + "allow pressy in System Settings > Privacy & Security > Accessibility")
-        }
-        for state in [0xA, 0xB] { // key down, key up
-            let event = NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(state << 8)),
-                                           timestamp: 0, windowNumber: 0, context: nil, subtype: 8, // NX_SUBTYPE_AUX_CONTROL_BUTTONS
-                                           data1: (key << 16) | (state << 8), data2: -1)
-            guard let cgEvent = event?.cgEvent else { throw AudioHardwareError(description: "creating the media key event failed") }
-            cgEvent.post(tap: .cghidEventTap)
-        }
-    }
-
-    private func spawn(_ executable: String, _ arguments: [String], label: String, pattern: String,
-                       completion: (@MainActor (Bool) -> Void)?) {
+    private func spawn(_ executable: String, _ arguments: [String], pattern: String, finish: @escaping @MainActor (Bool, String) -> Void) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -97,35 +123,29 @@ final class ActionRunner {
         let output = OutputTail()
         pipe.fileHandleForReading.readabilityHandler = { handle in output.append(handle.availableData) }
 
-        let started = Date()
         process.terminationHandler = { finished in
             pipe.fileHandleForReading.readabilityHandler = nil
             let status = finished.terminationStatus
             let signaled = finished.terminationReason == .uncaughtSignal
-            let millis = Int(Date().timeIntervalSince(started) * 1000)
             let text = output.text
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     if status == 0 && !signaled {
-                        Log.info("action done", ["pattern": pattern, "action": label, "ms": millis, "output": text])
+                        finish(true, text)
                     } else {
-                        Log.error("action failed", ["pattern": pattern, "action": label, "ms": millis,
-                                                    signaled ? "signal" : "exit": status, "output": text])
+                        finish(false, "\(signaled ? "signal" : "exit") \(status)\(text.isEmpty ? "" : ": " + text)")
                     }
-                    completion?(status == 0 && !signaled)
                 }
             }
         }
 
         do { try process.run() } catch {
-            Log.error("action failed", ["pattern": pattern, "action": label, "error": error.localizedDescription])
-            completion?(false)
-            return
+            return finish(false, error.localizedDescription)
         }
         let limit = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + limit) {
             if process.isRunning {
-                Log.error("action timeout", ["pattern": pattern, "action": label, "seconds": Int(limit)])
+                Log.error("action timeout", ["pattern": pattern, "executable": executable, "seconds": Int(limit)])
                 process.terminate()
             }
         }

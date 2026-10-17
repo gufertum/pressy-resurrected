@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import IOKit.hid
@@ -56,14 +57,30 @@ func installedShortcuts() -> Set<String>? {
     return Set(String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init))
 }
 
-func missingShortcuts(_ config: Config) -> [String]? {
-    let wanted = config.patterns.values.compactMap { action -> String? in
-        if case .shortcut(let name) = action { return name }
-        return nil
+/// Things in the config that will fail at press time: unknown Shortcuts, missing scripts and sounds,
+/// no app for raycast:// links. Empty when everything is in place.
+func configProblems(_ config: Config) -> [String] {
+    var problems: [String] = []
+    let shortcuts = config.allActions.compactMap { if case .shortcut(let name) = $0 { name } else { nil } }
+    if !shortcuts.isEmpty {
+        if let installed = installedShortcuts() {
+            problems += shortcuts.filter { !installed.contains($0) }.map { "unknown Shortcut \"\($0)\"" }
+        } else {
+            problems.append("cannot list Shortcuts (/usr/bin/shortcuts list failed)")
+        }
     }
-    guard !wanted.isEmpty else { return [] }
-    guard let installed = installedShortcuts() else { return nil }
-    return wanted.filter { !installed.contains($0) }.sorted()
+    for action in Set(config.allActions) {
+        switch action {
+        case .script(let path) where !FileManager.default.isExecutableFile(atPath: SoundLibrary.expand(path)):
+            problems.append("script \"\(path)\" does not exist or is not executable")
+        case .sound(let value) where SoundLibrary.resolve(value) == nil:
+            problems.append("no sound \"\(value)\" (a name from /System/Library/Sounds or a file path)")
+        case .raycast(let link) where URL(string: link).flatMap(NSWorkspace.shared.urlForApplication(toOpen:)) == nil:
+            problems.append("no app opens \"\(link)\"; is Raycast installed?")
+        default: break
+        }
+    }
+    return problems.sorted()
 }
 
 /// IOHIDCheckAccess keeps answering "not granted" inside a process that started without the
@@ -91,13 +108,14 @@ func accessName(_ access: IOHIDAccessType) -> String {
 @MainActor
 func check(_ url: URL) -> Never {
     let config = loadConfig(url)
-    guard let missing = missingShortcuts(config) else { fail("cannot list Shortcuts (/usr/bin/shortcuts list failed)", code: Exit.failure) }
-    if !missing.isEmpty { fail("\(url.path): unknown Shortcuts: \(missing.map { "\"\($0)\"" }.joined(separator: ", "))", code: Exit.config) }
+    let problems = configProblems(config)
+    if !problems.isEmpty { fail("\(url.path):\n  " + problems.joined(separator: "\n  "), code: Exit.config) }
     print("config ok: \(url.path)")
     print(String(format: "  long press >= %.0f ms, sequence gap %.0f ms, restoreAudioRoute %@, action timeout %.0f s",
                  config.timing.longPress * 1000, config.timing.sequenceGap * 1000, "\(config.restoreAudioRoute)", config.actionTimeout))
     for pattern in config.patterns.keys.sorted(by: { ($0.count, $0) < ($1.count, $1) }) {
-        print("  \(pattern.padding(toLength: 6, withPad: " ", startingAt: 0)) \(config.patterns[pattern]!)")
+        let actions = config.patterns[pattern]!.map(\.description).joined(separator: ", then ")
+        print("  \(pattern.padding(toLength: 6, withPad: " ", startingAt: 0)) \(actions)")
     }
     exit(Exit.ok)
 }
@@ -114,27 +132,22 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
                        "input_monitoring": accessName(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent))])
 
     if !dryRun {
-        switch missingShortcuts(config) {
-        case nil: Log.warn("cannot list Shortcuts, not checking names")
-        case let missing? where !missing.isEmpty: Log.error("unknown Shortcuts in config", ["names": missing.joined(separator: ", ")])
-        default: break
-        }
-        let needsAccessibility = config.patterns.values.contains { if case .builtin(let b) = $0 { b.needsAccessibility } else { false } }
-        if needsAccessibility && !CGPreflightPostEventAccess() {
+        for problem in configProblems(config) { Log.error("config problem", ["problem": problem]) }
+        if config.allActions.contains(where: \.needsAccessibility) && !CGPreflightPostEventAccess() {
             // Asking at start shows the prompt now instead of on the first press.
             CGRequestPostEventAccess()
-            Log.warn("media.* actions need Accessibility: System Settings > Privacy & Security > Accessibility > pressy")
+            Log.warn("keys and media actions need Accessibility: System Settings > Privacy & Security > Accessibility > pressy")
         }
     }
 
     let runner = ActionRunner(timeout: config.actionTimeout)
     let recognizer = PatternRecognizer(timing: config.timing, knownPatterns: Set(config.patterns.keys), schedule: mainQueueSchedule) { pattern in
-        guard let action = config.patterns[pattern] else {
+        guard let actions = config.patterns[pattern] else {
             Log.info("pattern", ["pattern": pattern, "mapped": false])
             return
         }
-        Log.info("pattern", ["pattern": pattern, "action": action.description, "dry_run": dryRun])
-        if !dryRun { runner.perform(action, pattern: pattern) }
+        Log.info("pattern", ["pattern": pattern, "actions": actions.map(\.description).joined(separator: ", then "), "dry_run": dryRun])
+        if !dryRun { runner.perform(actions, pattern: pattern) }
     }
 
     let button = HeadsetButton()
@@ -198,11 +211,11 @@ func daemon(_ url: URL, dryRun: Bool) -> Never {
 @MainActor
 func trigger(_ pattern: String, _ url: URL) -> Never {
     let config = loadConfig(url)
-    guard let action = config.patterns[pattern] else {
+    guard let actions = config.patterns[pattern] else {
         fail("no action mapped to \"\(pattern)\" in \(url.path)", code: Exit.usage)
     }
-    Log.info("pattern", ["pattern": pattern, "action": action.description, "trigger": true])
-    ActionRunner(timeout: config.actionTimeout).perform(action, pattern: pattern) { ok in
+    Log.info("pattern", ["pattern": pattern, "actions": actions.map(\.description).joined(separator: ", then "), "trigger": true])
+    ActionRunner(timeout: config.actionTimeout).perform(actions, pattern: pattern) { ok in
         exit(ok ? Exit.ok : Exit.failure)
     }
     CFRunLoopRun()

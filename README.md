@@ -93,8 +93,8 @@ A broken config is rejected with the exact spot (`patterns[".."]: unknown key "s
 | `longPressMs` | 500 | a press held this long is `-`, shorter is `.` (100-5000) |
 | `sequenceGapMs` | 400 | silence after a release that ends the pattern (100-3000) |
 | `restoreAudioRoute` | `true` | undo the switch to the jack's "headphones" and "microphone" when the Pressy is plugged in |
-| `actionTimeoutSeconds` | 30 | `run`, `shortcut`, `spotify.*` and `music.*` actions are stopped after this (1-3600) |
-| `patterns` | `{}` | pattern -> action |
+| `actionTimeoutSeconds` | 30 | child processes (`run`, `script`, `shortcut`, `raycast`, AppleScript built-ins) are stopped after this (1-3600) |
+| `patterns` | `{}` | pattern -> action, or a list of actions |
 
 Unknown keys are errors, so typos fail loudly instead of being silently ignored.
 
@@ -105,8 +105,23 @@ Each action has exactly one of these keys:
 | Action | Does |
 |---|---|
 | `{"builtin": "<name>"}` | one of the built-in actions below |
-| `{"shortcut": "<name>"}` | runs an Apple Shortcut by its exact name (`shortcuts run`); `pressy check` verifies the name exists |
-| `{"run": "<command>"}` | runs the command in a zsh login shell (`/bin/zsh -lc`), so your `PATH` from `.zprofile` applies; `PRESSY_PATTERN` holds the pattern |
+| `{"shortcut": "<name>"}` | runs an Apple Shortcut by its exact name (`shortcuts run`) |
+| `{"script": "<path>"}` | runs an executable file (`~` allowed, needs `chmod +x`) |
+| `{"run": "<command>"}` | runs the command in a zsh login shell (`/bin/zsh -lc`), so your `PATH` from `.zprofile` applies |
+| `{"keys": "<combo>"}` | presses a key combination, e.g. `cmd+shift+4`, `ctrl+cmd+q`, `opt+space`, `f5` (needs Accessibility) |
+| `{"raycast": "<deeplink>"}` | opens a Raycast deeplink: `confetti`, `extensions/raycast/clipboard-history/clipboard-history`, any `raycast://...` |
+| `{"sound": "<name or file>"}` | plays a system sound (`Glass`, `Ping`, `Submarine`, ... from `/System/Library/Sounds`) or any audio file |
+
+`script` and `run` get the pattern in `PRESSY_PATTERN`. `pressy check` verifies that Shortcuts, scripts and sounds exist and that an app handles `raycast://`.
+
+**Several actions per pattern.** Use a list; the actions run one after another. A sound only starts, so it never delays what follows:
+
+```json
+"-":   [{ "sound": "Tink" }, { "builtin": "input.togglemute" }],
+"--":  [{ "keys": "cmd+c" }, { "keys": "cmd+tab" }, { "keys": "cmd+v" }]
+```
+
+**Key combinations.** Modifiers `cmd`, `shift`, `ctrl`, `opt` (or `alt`), `fn`, joined with `+`. The last part is a character (`a`, `4`, `/`, written `plus` for `+`) or a named key: `return`, `tab`, `space`, `escape`, `delete`, `forwarddelete`, `left`, `right`, `up`, `down`, `home`, `end`, `pageup`, `pagedown`, `f1` to `f20`. Characters follow your current keyboard layout, so `cmd+z` is undo on QWERTZ as well. Any macOS or app shortcut works this way.
 
 **Built-in actions** (`pressy actions` lists them):
 
@@ -171,7 +186,7 @@ macOS asks once per permission. All entries are called `pressy` and live in **Sy
 |---|---|---|
 | Input Monitoring | the button itself, always | on the first start |
 | Automation (Spotify, Music) | `spotify.*`, `music.*` | on the first such press |
-| Accessibility | `media.*` only | at start, when the config uses a `media.*` action |
+| Accessibility | `keys` and `media.*` | at start, when the config uses one of them |
 
 **Input Monitoring** (required). pressy can hold the button without it, but macOS never delivers a single press.
 
@@ -190,7 +205,7 @@ Check the current state any time: `grep input_monitoring ~/Library/Logs/pressy.l
 
 **Automation** (Spotify, Music). The first `spotify.*` press shows *"pressy" wants access to control "Spotify"*: click **Allow**. Clicked Don't Allow by accident? Privacy & Security > Automation > pressy > Spotify, switch it on.
 
-**Accessibility** (`media.*` only). Switch **pressy** on under Privacy & Security > Accessibility, then `pressy reload`.
+**Accessibility** (`keys`, `media.*`). Switch **pressy** on under Privacy & Security > Accessibility, then `pressy reload`.
 
 **Updates and the signing certificate.** macOS ties every grant to the code signature of the binary.
 
