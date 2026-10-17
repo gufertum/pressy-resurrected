@@ -72,21 +72,23 @@ final class ActionRunner {
 
     private func perform(_ builtin: BuiltinAction, pattern: String, finish: @escaping @MainActor (Bool, String) -> Void) {
         do {
-            switch builtin {
-            case .mediaPlayPause: try Keyboard.postMediaKey(16) // NX_KEYTYPE_PLAY
-            case .mediaNext: try Keyboard.postMediaKey(17) // NX_KEYTYPE_NEXT
-            case .mediaPrevious: try Keyboard.postMediaKey(18) // NX_KEYTYPE_PREVIOUS
-            case .outputToggleMute, .inputToggleMute:
-                let result = try AudioHardware.toggleMute(input: builtin == .inputToggleMute)
-                return finish(true, "\(result.device) muted=\(result.muted)")
-            case .outputVolumeUp, .outputVolumeDown:
-                let result = try AudioHardware.changeOutputVolume(by: builtin == .outputVolumeUp ? 1 / 16 : -1 / 16)
-                return finish(true, String(format: "%@ volume=%.2f", result.device, result.volume))
-            default:
-                guard let script = Self.appleScript(for: builtin) else { preconditionFailure("no implementation for \(builtin.rawValue)") }
-                return spawn("/usr/bin/osascript", ["-e", script], pattern: pattern, finish: finish)
+            switch builtin.implementation {
+            case .process(let executable, let arguments):
+                spawn(executable, arguments, pattern: pattern, finish: finish)
+            case .appleScript(let script):
+                spawn("/usr/bin/osascript", ["-e", script], pattern: pattern, finish: finish)
+            case .keys(let text):
+                let combo = try KeyCombo(parsing: text)
+                try Keyboard.post(combo)
+                finish(true, combo.symbols)
+            case .mediaKey(let key):
+                try Keyboard.postMediaKey(key)
+                finish(true, "")
+            case .inProcess:
+                finish(true, try performInProcess(builtin))
             }
-            finish(true, "")
+        } catch let error as ActionError {
+            finish(false, error.description)
         } catch let error as AudioHardwareError {
             finish(false, error.description)
         } catch {
@@ -94,19 +96,36 @@ final class ActionRunner {
         }
     }
 
-    static func appleScript(for builtin: BuiltinAction) -> String? {
-        let (app, command): (String, String)
+    private func performInProcess(_ builtin: BuiltinAction) throws -> String {
         switch builtin {
-        case .spotifyPlayPause: (app, command) = ("Spotify", "playpause")
-        case .spotifyNext: (app, command) = ("Spotify", "next track")
-        case .spotifyPrevious: (app, command) = ("Spotify", "previous track")
-        case .musicPlayPause: (app, command) = ("Music", "playpause")
-        case .musicNext: (app, command) = ("Music", "next track")
-        case .musicPrevious: (app, command) = ("Music", "previous track")
-        default: return nil
+        case .outputToggleMute, .inputToggleMute:
+            let result = try AudioHardware.toggleMute(input: builtin == .inputToggleMute)
+            return "\(result.device) muted=\(result.muted)"
+        case .outputVolumeUp, .outputVolumeDown:
+            let result = try AudioHardware.changeOutputVolume(by: builtin == .outputVolumeUp ? 1 / 16 : -1 / 16)
+            return String(format: "%@ volume=%.2f", result.device, result.volume)
+        case .caffeinateToggle:
+            return try toggleCaffeinate()
+        default:
+            preconditionFailure("\(builtin.rawValue) is not implemented in process")
         }
-        // Checking first keeps a press from launching the app.
-        return "if application \"\(app)\" is running then\ntell application \"\(app)\" to \(command)\nelse\nreturn \"\(app) is not running\"\nend if"
+    }
+
+    private var caffeinate: Process?
+
+    /// `caffeinate -dims` runs until toggled off or pressy stops (`-w` ties it to pressy's pid).
+    private func toggleCaffeinate() throws -> String {
+        if let running = caffeinate, running.isRunning {
+            running.terminate()
+            caffeinate = nil
+            return "awake=false"
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        process.arguments = ["-dims", "-w", String(getpid())]
+        do { try process.run() } catch { throw ActionError(description: "caffeinate: \(error.localizedDescription)") }
+        caffeinate = process
+        return "awake=true"
     }
 
     private func spawn(_ executable: String, _ arguments: [String], pattern: String, finish: @escaping @MainActor (Bool, String) -> Void) {
